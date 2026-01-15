@@ -5,6 +5,9 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  // ADD THIS LINE BELOW:
+  base: "/pes-magic-patcher/", 
+  
   server: {
     host: "::",
     port: 8080,
