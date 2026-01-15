@@ -1,17 +1,11 @@
-import { decryptBuffer } from "../crypto/pesCrypto.js";
+import { decryptEditBin } from "@/crypto/pesCrypto";
 
 export async function loadEditBin(file) {
-  const buf = new Uint8Array(await file.arrayBuffer());
-
-  const decrypted = decryptBuffer(buf);
+  const encrypted = new Uint8Array(await file.arrayBuffer());
+  const decrypted = decryptEditBin(encrypted);
 
   return {
     raw: decrypted,
-    playersOffset: 0x2000, // from 4ccEditor specs
-    teamsOffset: 0x8000
+    size: decrypted.length
   };
-}
-
-export function exportEditBin(data) {
-  return decryptBuffer(data.raw);
 }
