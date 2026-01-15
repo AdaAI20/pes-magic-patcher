@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
+
 import Dashboard from "./pages/Dashboard";
 import Players from "./pages/Players";
 import Teams from "./pages/Teams";
@@ -17,6 +18,9 @@ import PatchBuilder from "./pages/PatchBuilder";
 import FileBrowser from "./pages/FileBrowser";
 import SettingsPage from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+
+import EditBin from "./pages/EditBin";
+import OptionFiles from "./pages/OptionFiles";
 
 const queryClient = new QueryClient();
 
@@ -35,6 +39,11 @@ const App = () => (
             <Route path="/faces" element={<Faces />} />
             <Route path="/kits" element={<Kits />} />
             <Route path="/balls" element={<Balls />} />
+
+            {/* NEW */}
+            <Route path="/edit-bin" element={<EditBin />} />
+            <Route path="/option-files" element={<OptionFiles />} />
+
             <Route path="/import" element={<Import />} />
             <Route path="/export" element={<Export />} />
             <Route path="/patch-builder" element={<PatchBuilder />} />
