@@ -1,4 +1,5 @@
-import Module from "../wasm/pes_crypto.js";
+import * as ModuleRaw from "../wasm/pes_crypto.js";
+const Module = ModuleRaw.default || ModuleRaw;
 
 let wasm;
 
