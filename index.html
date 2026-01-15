@@ -16,6 +16,9 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@Lovable" />
     <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+
+    <!-- ADDED: Link to the PWA Manifest -->
+    <link rel="manifest" href="/pes-magic-patcher/manifest.json" />
   </head>
 
   <body>
@@ -23,6 +26,7 @@
     <div id="root"></div>
 
     <!-- Vite / Lovable entry -->
-    <script type="module" src="/src/main.tsx"></script>
+    <!-- UPDATED: Removed leading slash from src -->
+    <script type="module" src="src/main.tsx"></script>
   </body>
 </html>
