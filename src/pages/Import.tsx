@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-/* 🔑 NEW IMPORTS */
+/* 🔑 CORE IMPORTS */
 import { initCrypto } from "@/crypto/pesCrypto";
 import { loadEditBin } from "@/parsers/editBinParser";
 import { useEditBinStore } from "@/store/editBinStore";
@@ -39,7 +39,7 @@ const formatSize = (bytes: number) =>
 const detectType = (file: File): ImportedFile["type"] => {
   const name = file.name.toLowerCase();
 
-  if (name === "edit00000000") return "BIN";
+  if (name === "edit00000000" || name === "edit00000000.bin") return "BIN";
   if (name.endsWith(".bin")) return "BIN";
   if (name.endsWith(".cpk")) return "CPK";
   if (name.endsWith(".ted")) return "TED";
@@ -63,8 +63,8 @@ export default function Import() {
   const [dragActive, setDragActive] = useState(false);
   const [files, setFiles] = useState<ImportedFile[]>([]);
 
-  /* 🌍 GLOBAL STORE */
-  const setEditBin = useEditBinStore((s) => s.setEditBin);
+  /* 🌍 GLOBAL STORE ACTION */
+  const loadToStore = useEditBinStore((s) => s.loadEditBin);
 
   /* ----------------------------- CORE LOGIC ----------------------------- */
 
@@ -74,13 +74,12 @@ export default function Import() {
 
       const result = await loadEditBin(file);
 
-      setEditBin({
-        raw: result.raw,
+      loadToStore({
         header: result.header,
+        raw: result.raw,
       });
 
       console.log("EDIT00000000 loaded:", result.header);
-
       updateStatus(index, "loaded");
     } catch (err) {
       console.error("EDIT00000000 failed:", err);
@@ -108,11 +107,14 @@ export default function Import() {
     const baseIndex = files.length;
     setFiles((prev) => [...prev, ...incoming]);
 
-    // 🔥 PROCESS FILES
     incoming.forEach((item, i) => {
       const index = baseIndex + i;
 
-      if (item.type === "BIN" && item.file.name === "EDIT00000000") {
+      if (
+        item.type === "BIN" &&
+        (item.file.name === "EDIT00000000" ||
+          item.file.name === "EDIT00000000.bin")
+      ) {
         handleEditBin(item.file, index);
       }
     });
@@ -173,6 +175,7 @@ export default function Import() {
           ref={fileInputRef}
           type="file"
           multiple
+          accept=".bin,.cpk,.ted,.dat,EDIT00000000"
           hidden
           onChange={(e) => addFiles(e.target.files)}
         />
@@ -203,8 +206,10 @@ export default function Import() {
                 <span
                   className={cn(
                     "text-xs font-mono px-2 py-1 rounded",
-                    file.status === "loaded" && "bg-success/20 text-success",
-                    file.status === "error" && "bg-destructive/20 text-destructive",
+                    file.status === "loaded" &&
+                      "bg-success/20 text-success",
+                    file.status === "error" &&
+                      "bg-destructive/20 text-destructive",
                     file.status === "pending" && "bg-secondary"
                   )}
                 >
