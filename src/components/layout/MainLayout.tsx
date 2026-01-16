@@ -4,12 +4,13 @@ import TopNavbar from "./TopNavbar";
 
 export default function MainLayout() {
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+    <div className="flex min-h-screen bg-background text-foreground">
+      {/* Sidebar takes fixed space, content gets margin */}
       <Sidebar />
 
-      <div className="flex flex-1 flex-col">
+      {/* Wrap right side */}
+      <div className="flex-1 ml-60 flex flex-col">
         <TopNavbar />
-
         <main className="flex-1 overflow-auto p-6">
           <Outlet />
         </main>
