@@ -1,10 +1,5 @@
-import createPesCryptoModule from "../wasm/pes_crypto.js";
-
 let modulePromise = null;
 
-/**
- * Initialize WASM module once
- */
 async function getModule() {
   if (!modulePromise) {
     modulePromise = createPesCryptoModule();
@@ -12,48 +7,32 @@ async function getModule() {
   return modulePromise;
 }
 
-/**
- * Decrypt PES edit.bin
- * @param {Uint8Array} data
- * @returns {Uint8Array}
- */
 export async function decryptEditBin(data) {
-  const Module = await getModule();
+  const mod = await getModule();
+  const decrypt = mod.cwrap("decrypt", "number", ["number", "number"]);
 
-  const size = data.length;
-  const inputPtr = Module._malloc(size);
-  const outputPtr = Module._malloc(size);
+  const ptr = mod._malloc(data.length);
+  mod.HEAPU8.set(data, ptr);
 
-  Module.HEAPU8.set(data, inputPtr);
-  Module._decrypt(inputPtr, outputPtr, size);
+  decrypt(ptr, data.length);
 
-  const result = new Uint8Array(Module.HEAPU8.subarray(outputPtr, outputPtr + size));
-
-  Module._free(inputPtr);
-  Module._free(outputPtr);
+  const result = mod.HEAPU8.slice(ptr, ptr + data.length);
+  mod._free(ptr);
 
   return result;
 }
 
-/**
- * Encrypt PES edit.bin
- * @param {Uint8Array} data
- * @returns {Uint8Array}
- */
 export async function encryptEditBin(data) {
-  const Module = await getModule();
+  const mod = await getModule();
+  const encrypt = mod.cwrap("encrypt", "number", ["number", "number"]);
 
-  const size = data.length;
-  const inputPtr = Module._malloc(size);
-  const outputPtr = Module._malloc(size);
+  const ptr = mod._malloc(data.length);
+  mod.HEAPU8.set(data, ptr);
 
-  Module.HEAPU8.set(data, inputPtr);
-  Module._encrypt(inputPtr, outputPtr, size);
+  encrypt(ptr, data.length);
 
-  const result = new Uint8Array(Module.HEAPU8.subarray(outputPtr, outputPtr + size));
-
-  Module._free(inputPtr);
-  Module._free(outputPtr);
+  const result = mod.HEAPU8.slice(ptr, ptr + data.length);
+  mod._free(ptr);
 
   return result;
 }
