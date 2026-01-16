@@ -1,29 +1,32 @@
 export default function Home() {
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-bold text-gradient-primary">
-        PES Magic Patcher
-      </h1>
+    <div className="min-h-screen flex items-center justify-center px-6">
+      <div className="card-gaming max-w-2xl w-full p-8 space-y-6">
+        <h1 className="text-4xl font-bold text-gradient-primary">
+          PES Magic Patcher
+        </h1>
 
-      <p className="mt-4 text-muted-foreground max-w-xl">
-        Welcome! Use the menu to open EDIT.BIN, OPTION FILE (.TED),
-        and PES 2021 save editors.
-      </p>
+        <p className="text-muted-foreground text-lg">
+          Welcome to the PES Magic Patcher editor suite.
+          Use the tools below to edit BIN files and Option Files
+          with a modern gaming-style interface.
+        </p>
 
-      <div className="mt-6 flex gap-4">
-        <a
-          href="/pes-magic-patcher/edit-bin"
-          className="px-4 py-2 rounded-lg bg-gradient-primary text-black font-semibold glow-primary"
-        >
-          EDIT.BIN Editor
-        </a>
+        <div className="flex flex-col sm:flex-row gap-4 pt-4">
+          <a
+            href="/pes-magic-patcher/edit-bin"
+            className="bg-gradient-primary text-primary-foreground px-6 py-3 rounded-lg font-semibold text-center glow-primary hover:scale-[1.02] transition-transform"
+          >
+            Edit BIN Files
+          </a>
 
-        <a
-          href="/pes-magic-patcher/option-file"
-          className="px-4 py-2 rounded-lg bg-secondary text-foreground border border-border"
-        >
-          Option File (.TED)
-        </a>
+          <a
+            href="/pes-magic-patcher/option-file"
+            className="bg-gradient-accent text-accent-foreground px-6 py-3 rounded-lg font-semibold text-center glow-accent hover:scale-[1.02] transition-transform"
+          >
+            Option File Editor
+          </a>
+        </div>
       </div>
     </div>
   );
