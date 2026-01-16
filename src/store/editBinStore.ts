@@ -28,18 +28,19 @@ interface EditBinState {
 
   rawBuffer: ArrayBuffer | null;
   header: EditBinHeader | null;
+
   players: Player[];
 
   loadEditBin: (data: {
-    raw: ArrayBuffer;
     header: EditBinHeader;
+    raw: ArrayBuffer;
   }) => void;
 
   clear: () => void;
 }
 
 /* ------------------------------------------------------------------ */
-/* BASIC PLAYER PARSER (TEMP) */
+/* VERY BASIC PLAYER PARSER (FOUNDATION) */
 /* ------------------------------------------------------------------ */
 
 function parsePlayers(
@@ -57,20 +58,42 @@ function parsePlayers(
     const offset = BASE + i * STRIDE;
     if (offset + STRIDE > buffer.byteLength) break;
 
+    const id = view.getUint32(offset, true);
+    const overall = view.getUint8(offset + 0x20);
+    const posRaw = view.getUint8(offset + 0x21);
+
     players.push({
-      id: view.getUint32(offset, true),
-      name: `Player ${i + 1}`,
+      id,
+      name: `Player ${id}`,
       teamId: view.getUint16(offset + 0x10, true),
-      overall: view.getUint8(offset + 0x20),
-      position: "UNK",
+      overall,
+      position: decodePosition(posRaw),
     });
   }
 
   return players;
 }
 
+function decodePosition(value: number): string {
+  const map: Record<number, string> = {
+    0x00: "GK",
+    0x01: "CB",
+    0x02: "LB",
+    0x03: "RB",
+    0x04: "DMF",
+    0x05: "CMF",
+    0x06: "AMF",
+    0x07: "LWF",
+    0x08: "RWF",
+    0x09: "SS",
+    0x0a: "CF",
+  };
+
+  return map[value] ?? "UNK";
+}
+
 /* ------------------------------------------------------------------ */
-/* STORE */
+/* ZUSTAND STORE */
 /* ------------------------------------------------------------------ */
 
 export const useEditBinStore = create<EditBinState>()((set) => ({
@@ -79,12 +102,12 @@ export const useEditBinStore = create<EditBinState>()((set) => ({
   header: null,
   players: [],
 
-  loadEditBin: ({ raw, header }) =>
+  loadEditBin: ({ header, raw }) =>
     set(
       produce((state: EditBinState) => {
         state.loaded = true;
-        state.rawBuffer = raw;
         state.header = header;
+        state.rawBuffer = raw;
         state.players = parsePlayers(raw, header);
       })
     ),
