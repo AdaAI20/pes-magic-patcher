@@ -37,13 +37,11 @@ const formatSize = (bytes: number) =>
 
 const detectType = (file: File): ImportedFile["type"] => {
   const name = file.name.toLowerCase();
-
   if (name === "edit00000000") return "BIN";
   if (name.endsWith(".bin")) return "BIN";
   if (name.endsWith(".cpk")) return "CPK";
   if (name.endsWith(".ted")) return "TED";
   if (name.endsWith(".dat")) return "DAT";
-
   return "UNKNOWN";
 };
 
@@ -67,23 +65,26 @@ export default function Import() {
   /* ----------------------------- CORE LOGIC ----------------------------- */
 
   const handleEditBin = async (file: File, index: number) => {
-    try {
-      console.log("[IMPORT] Loading EDIT00000000:", file.name);
+    console.log("[IMPORT] Handling EDIT00000000");
 
+    try {
       await initCrypto();
 
+      console.log("[IMPORT] Reading file...");
       const result = await loadEditBin(file);
 
       console.log("[IMPORT] Parsed header:", result.header);
 
       loadEditBinToStore({
-        raw: result.raw,
         header: result.header,
+        raw: result.raw,
       });
+
+      console.log("[IMPORT] Stored EDIT00000000 in Zustand");
 
       updateStatus(index, "loaded");
     } catch (err) {
-      console.error("[IMPORT] EDIT00000000 failed:", err);
+      console.error("[IMPORT] FAILED:", err);
       updateStatus(index, "error");
     }
   };
@@ -110,7 +111,6 @@ export default function Import() {
 
     incoming.forEach((item, i) => {
       const index = baseIndex + i;
-
       if (item.type === "BIN" && item.file.name === "EDIT00000000") {
         handleEditBin(item.file, index);
       }
@@ -157,6 +157,9 @@ export default function Import() {
         <h3 className="text-xl font-semibold mb-2">
           Drop files here or click to browse
         </h3>
+        <p className="text-muted-foreground mb-4">
+          EDIT00000000 • .bin • .cpk • .ted • .dat
+        </p>
 
         <Button variant="gaming" size="lg">
           <FolderOpen className="w-5 h-5 mr-2" />
@@ -174,6 +177,8 @@ export default function Import() {
 
       {files.length > 0 && (
         <div className="space-y-4">
+          <h2 className="section-title">Import Queue</h2>
+
           {files.map((file, index) => {
             const Icon = iconByType[file.type];
 
@@ -182,14 +187,25 @@ export default function Import() {
                 key={index}
                 className="card-gaming p-4 flex items-center gap-4"
               >
-                <Icon className="w-5 h-5" />
+                <div className="p-2 rounded-lg bg-secondary">
+                  <Icon className="w-5 h-5" />
+                </div>
 
-                <div className="flex-1">
-                  <p className="font-medium">{file.name}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{file.name}</p>
                   <p className="text-xs text-muted-foreground">{file.size}</p>
                 </div>
 
-                <span className="text-xs font-mono">
+                <span
+                  className={cn(
+                    "text-xs font-mono px-2 py-1 rounded",
+                    file.status === "loaded" &&
+                      "bg-success/20 text-success",
+                    file.status === "error" &&
+                      "bg-destructive/20 text-destructive",
+                    file.status === "pending" && "bg-secondary"
+                  )}
+                >
                   {file.status.toUpperCase()}
                 </span>
 
