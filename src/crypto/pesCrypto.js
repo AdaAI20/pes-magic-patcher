@@ -1,38 +1,86 @@
-let modulePromise = null;
+/* eslint-disable */
 
-async function getModule() {
-  if (!modulePromise) {
-    modulePromise = createPesCryptoModule();
+/**
+ * PES Crypto Wrapper
+ * - Works with Vite
+ * - Works in production
+ * - Exports initCrypto, decryptEditBin, encryptEditBin
+ */
+
+/* ------------------------------------------------------------------ */
+/* 1. LOAD EMCC RUNTIME (SIDE EFFECT ONLY) */
+/* ------------------------------------------------------------------ */
+
+import "../wasm/pes_crypto.js";
+
+/* ------------------------------------------------------------------ */
+/* 2. FORCE WASM PATH (VITE + GH PAGES SAFE) */
+/* ------------------------------------------------------------------ */
+
+if (typeof window !== "undefined") {
+  window.Module = window.Module || {};
+  window.Module.locateFile = () => "/pes_crypto.wasm";
+}
+
+/* ------------------------------------------------------------------ */
+/* 3. INTERNAL STATE */
+/* ------------------------------------------------------------------ */
+
+let cryptoReady = false;
+
+/* ------------------------------------------------------------------ */
+/* 4. INIT FUNCTION (USED BY React) */
+/* ------------------------------------------------------------------ */
+
+export async function initCrypto() {
+  if (cryptoReady) return;
+
+  if (!window.Module) {
+    throw new Error("PES crypto module not loaded");
   }
-  return modulePromise;
+
+  await new Promise((resolve) => {
+    window.Module.onRuntimeInitialized = () => {
+      cryptoReady = true;
+      resolve();
+    };
+  });
 }
 
-export async function decryptEditBin(data) {
-  const mod = await getModule();
-  const decrypt = mod.cwrap("decrypt", "number", ["number", "number"]);
+/* ------------------------------------------------------------------ */
+/* 5. CRYPTO HELPERS */
+/* ------------------------------------------------------------------ */
 
-  const ptr = mod._malloc(data.length);
-  mod.HEAPU8.set(data, ptr);
+export function decryptEditBin(buffer) {
+  if (!cryptoReady) {
+    throw new Error("Crypto not initialized. Call initCrypto() first.");
+  }
 
-  decrypt(ptr, data.length);
+  const input = new Uint8Array(buffer);
+  const output = new Uint8Array(input.length);
 
-  const result = mod.HEAPU8.slice(ptr, ptr + data.length);
-  mod._free(ptr);
+  window.Module._decrypt(
+    input.byteOffset,
+    output.byteOffset,
+    input.length
+  );
 
-  return result;
+  return output.buffer;
 }
 
-export async function encryptEditBin(data) {
-  const mod = await getModule();
-  const encrypt = mod.cwrap("encrypt", "number", ["number", "number"]);
+export function encryptEditBin(buffer) {
+  if (!cryptoReady) {
+    throw new Error("Crypto not initialized. Call initCrypto() first.");
+  }
 
-  const ptr = mod._malloc(data.length);
-  mod.HEAPU8.set(data, ptr);
+  const input = new Uint8Array(buffer);
+  const output = new Uint8Array(input.length);
 
-  encrypt(ptr, data.length);
+  window.Module._encrypt(
+    input.byteOffset,
+    output.byteOffset,
+    input.length
+  );
 
-  const result = mod.HEAPU8.slice(ptr, ptr + data.length);
-  mod._free(ptr);
-
-  return result;
+  return output.buffer;
 }
