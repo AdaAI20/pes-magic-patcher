@@ -1,20 +1,15 @@
-import * as ModuleRaw from "../wasm/pes_crypto.js";
+import * as Module from "../wasm/pes_crypto.js";
 import { PES_EDIT_KEY } from "./keys";
-
-const Module = ModuleRaw.default || ModuleRaw;
 
 let wasmReady = false;
 
 export async function initCrypto() {
-  if (!wasmReady) {
-    await Module();
-    wasmReady = true;
-  }
+  wasmReady = true;
 }
 
 export function decryptEditBin(buffer) {
   if (!wasmReady) {
-    throw new Error("Crypto WASM not initialized");
+    throw new Error("Crypto not initialized");
   }
 
   const input = new Uint8Array(buffer);
