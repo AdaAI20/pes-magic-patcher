@@ -1,20 +1,39 @@
-import Module from "../wasm/pes_crypto.js";
+/* =========================================================
+   PES CRYPTO — TEMP DEBUG / NO-OP VERSION (GitHub Pages)
+   ========================================================= */
 
-let wasm: any;
+console.log("[CRYPTO] pesCrypto module loaded");
 
-export async function initCrypto() {
-  if (!wasm) {
-    wasm = await Module();
-  }
+/**
+ * TEMP: Skip real crypto for now
+ * Reason:
+ * - WASM fails silently on GitHub Pages
+ * - We must unblock EDIT loading first
+ */
+
+let initialized = false;
+
+export async function initCrypto(): Promise<void> {
+  console.warn("[CRYPTO] initCrypto() SKIPPED (debug mode)");
+  initialized = true;
 }
 
-export function decryptBuffer(data: Uint8Array, key = 0xaa): Uint8Array {
-  const ptr = wasm._malloc(data.length);
-  wasm.HEAPU8.set(data, ptr);
+/**
+ * TEMP: Return raw buffer untouched
+ */
+export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
+  if (!initialized) {
+    console.warn("[CRYPTO] decryptEditBin called before initCrypto");
+  }
 
-  wasm._decrypt(ptr, data.length, key);
+  console.log("[CRYPTO] decryptEditBin passthrough");
+  return buffer;
+}
 
-  const out = wasm.HEAPU8.slice(ptr, ptr + data.length);
-  wasm._free(ptr);
-  return out;
+/**
+ * TEMP: Return raw buffer untouched
+ */
+export function encryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
+  console.log("[CRYPTO] encryptEditBin passthrough");
+  return buffer;
 }
