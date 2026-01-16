@@ -5,8 +5,10 @@ export default defineConfig({
   base: "/pes-magic-patcher/",
   plugins: [
     react({
-      jsxImportSource: "react",
-      jsxRuntime: "automatic",
+      jsxRuntime: "classic",
     }),
   ],
+  esbuild: {
+    jsxInject: `import React from "react"`,
+  },
 });
