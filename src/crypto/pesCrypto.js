@@ -1,35 +1,37 @@
-import { Blowfish } from "./blowfish";
+import * as ModuleRaw from "../wasm/pes_crypto.js";
 import { PES_EDIT_KEY } from "./keys";
 
+const Module = ModuleRaw.default || ModuleRaw;
+
+let wasmReady = false;
+
+export async function initCrypto() {
+  if (!wasmReady) {
+    await Module();
+    wasmReady = true;
+  }
+}
+
 export function decryptEditBin(buffer) {
-  const bf = new Blowfish(PES_EDIT_KEY);
-  const out = new Uint8Array(buffer.length);
-
-  for (let i = 0; i < buffer.length; i += 8) {
-    const l =
-      (buffer[i] << 24) |
-      (buffer[i + 1] << 16) |
-      (buffer[i + 2] << 8) |
-      buffer[i + 3];
-
-    const r =
-      (buffer[i + 4] << 24) |
-      (buffer[i + 5] << 16) |
-      (buffer[i + 6] << 8) |
-      buffer[i + 7];
-
-    const [dl, dr] = bf.decryptBlock(l, r);
-
-    out[i] = (dl >>> 24) & 0xff;
-    out[i + 1] = (dl >>> 16) & 0xff;
-    out[i + 2] = (dl >>> 8) & 0xff;
-    out[i + 3] = dl & 0xff;
-
-    out[i + 4] = (dr >>> 24) & 0xff;
-    out[i + 5] = (dr >>> 16) & 0xff;
-    out[i + 6] = (dr >>> 8) & 0xff;
-    out[i + 7] = dr & 0xff;
+  if (!wasmReady) {
+    throw new Error("Crypto WASM not initialized");
   }
 
-  return out;
+  const input = new Uint8Array(buffer);
+  const len = input.length;
+
+  const dataPtr = Module._malloc(len);
+  const keyPtr = Module._malloc(PES_EDIT_KEY.length);
+
+  Module.HEAPU8.set(input, dataPtr);
+  Module.HEAPU8.set(PES_EDIT_KEY, keyPtr);
+
+  Module._pes_xor(dataPtr, len, keyPtr, PES_EDIT_KEY.length);
+
+  const output = Module.HEAPU8.slice(dataPtr, dataPtr + len);
+
+  Module._free(dataPtr);
+  Module._free(keyPtr);
+
+  return output.buffer;
 }
