@@ -57,7 +57,7 @@ export default function Import() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    // Handle file drop
+    // future: handle file drop
   };
 
   const removeFile = (index: number) => {
@@ -81,7 +81,7 @@ export default function Import() {
         <div className="lg:col-span-2 space-y-6">
           <div
             className={cn(
-              "card-gaming border-2 border-dashed p-12 text-center transition-all duration-300",
+              "card-gaming border-2 border-dashed p-12 text-center transition-all duration-300 cursor-pointer",
               dragActive
                 ? "border-primary bg-primary/5"
                 : "border-border hover:border-primary/50"
@@ -104,12 +104,14 @@ export default function Import() {
                 )}
               />
             </div>
+
             <h3 className="font-display font-semibold text-xl text-foreground mb-2">
               Drop files here to import
             </h3>
             <p className="text-muted-foreground mb-6">
               or click to browse your files
             </p>
+
             <Button variant="gaming" size="lg">
               <FolderOpen className="w-5 h-5 mr-2" />
               Browse Files
@@ -120,6 +122,7 @@ export default function Import() {
           {importedFiles.length > 0 && (
             <div className="space-y-4">
               <h2 className="section-title">Import Queue</h2>
+
               <div className="space-y-3">
                 {importedFiles.map((file, index) => (
                   <div
@@ -128,7 +131,7 @@ export default function Import() {
                   >
                     <div
                       className={cn(
-                        "p-2.5 rounded-lg",
+                        "p-2.5 rounded-lg shrink-0",
                         file.status === "success" && "bg-success/15 text-success",
                         file.status === "error" && "bg-destructive/15 text-destructive",
                         file.status === "importing" && "bg-primary/15 text-primary",
@@ -155,14 +158,21 @@ export default function Import() {
                       </div>
 
                       {file.status === "importing" && file.progress !== undefined ? (
-                        <div className="w-full bg-secondary rounded-full h-1.5">
+                        <div className="w-full bg-secondary rounded-full h-1.5 overflow-hidden">
                           <div
                             className="bg-primary h-1.5 rounded-full transition-all duration-300"
                             style={{ width: `${file.progress}%` }}
                           />
                         </div>
                       ) : (
-                        <p className="text-xs text-muted-foreground">
+                        <p
+                          className={cn(
+                            "text-xs",
+                            file.status === "success" && "text-success",
+                            file.status === "error" && "text-destructive",
+                            file.status === "pending" && "text-muted-foreground"
+                          )}
+                        >
                           {file.status === "success" && "Import complete"}
                           {file.status === "error" && "Import failed"}
                           {file.status === "pending" && "Waiting..."}
@@ -177,6 +187,7 @@ export default function Import() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      disabled={file.status === "importing"}
                       className="h-8 w-8 text-muted-foreground hover:text-destructive"
                       onClick={() => removeFile(index)}
                     >
@@ -192,13 +203,14 @@ export default function Import() {
         {/* Supported Formats */}
         <div className="space-y-4">
           <h2 className="section-title">Supported Formats</h2>
+
           <div className="space-y-3">
             {supportedFiles.map((file) => {
               const Icon = file.icon;
               return (
                 <div
                   key={file.extension}
-                  className="card-gaming p-4 flex items-start gap-3 hover:border-primary/30 transition-colors cursor-pointer"
+                  className="card-gaming p-4 flex items-start gap-3 hover:border-primary/40 hover:-translate-y-0.5 transition-all cursor-pointer"
                 >
                   <div className={cn("p-2 rounded-lg bg-secondary", file.color)}>
                     <Icon className="w-5 h-5" />
@@ -226,6 +238,7 @@ export default function Import() {
             <h3 className="font-display font-semibold text-foreground mb-3">
               Quick Import
             </h3>
+
             <div className="space-y-2">
               <Button variant="outline" className="w-full justify-start gap-2">
                 <HardDrive className="w-4 h-4" />
