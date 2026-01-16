@@ -40,7 +40,7 @@ interface EditBinState {
 }
 
 /* ------------------------------------------------------------------ */
-/* VERY BASIC PLAYER PARSER (FOUNDATION) */
+/* PLAYER PARSER (FOUNDATION) */
 /* ------------------------------------------------------------------ */
 
 function parsePlayers(
@@ -51,21 +51,24 @@ function parsePlayers(
   const players: Player[] = [];
 
   const BASE = header.playerOffset;
-  const STRIDE = 0x80;
+  const STRIDE = 0x80; // placeholder, refined later
+
   const count = Math.min(header.playerCount, 200);
 
   for (let i = 0; i < count; i++) {
     const offset = BASE + i * STRIDE;
+
     if (offset + STRIDE > buffer.byteLength) break;
 
-    const id = view.getUint32(offset, true);
+    const id = view.getUint32(offset + 0x00, true);
+    const teamId = view.getUint16(offset + 0x10, true);
     const overall = view.getUint8(offset + 0x20);
     const posRaw = view.getUint8(offset + 0x21);
 
     players.push({
       id,
       name: `Player ${id}`,
-      teamId: view.getUint16(offset + 0x10, true),
+      teamId,
       overall,
       position: decodePosition(posRaw),
     });
@@ -73,6 +76,10 @@ function parsePlayers(
 
   return players;
 }
+
+/* ------------------------------------------------------------------ */
+/* POSITION DECODER (TEMP) */
+/* ------------------------------------------------------------------ */
 
 function decodePosition(value: number): string {
   const map: Record<number, string> = {
@@ -98,6 +105,7 @@ function decodePosition(value: number): string {
 
 export const useEditBinStore = create<EditBinState>()((set) => ({
   loaded: false,
+
   rawBuffer: null,
   header: null,
   players: [],
@@ -105,6 +113,11 @@ export const useEditBinStore = create<EditBinState>()((set) => ({
   loadEditBin: ({ header, raw }) =>
     set(
       produce((state: EditBinState) => {
+        console.log("[STORE] EDIT00000000 loaded", {
+          fileSize: raw.byteLength,
+          players: header.playerCount,
+        });
+
         state.loaded = true;
         state.header = header;
         state.rawBuffer = raw;
