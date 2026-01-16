@@ -1,17 +1,26 @@
 import { Outlet } from "react-router-dom";
+import { useState } from "react";
 import Sidebar from "./Sidebar";
 import TopNavbar from "./TopNavbar";
 
 export default function MainLayout() {
-  return (
-    <div className="flex min-h-screen bg-background text-foreground">
-      {/* Sidebar takes fixed space, content gets margin */}
-      <Sidebar />
+  const [collapsed, setCollapsed] = useState(false);
 
-      {/* Wrap right side */}
-      <div className="flex-1 ml-60 flex flex-col">
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      <Sidebar
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((v) => !v)}
+      />
+
+      {/* Content shifts dynamically */}
+      <div
+        className={`transition-all duration-300 ${
+          collapsed ? "ml-16" : "ml-60"
+        }`}
+      >
         <TopNavbar />
-        <main className="flex-1 overflow-auto p-6">
+        <main className="p-6">
           <Outlet />
         </main>
       </div>
