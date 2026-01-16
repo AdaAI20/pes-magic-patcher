@@ -13,90 +13,58 @@ Module.locateFile = function (path) {
 };
 
 // ===============================
-// EMSCRIPTEN GENERATED CODE
-// (unchanged, except bottom)
+// ENVIRONMENT DETECTION
 // ===============================
 
-var ENVIRONMENT_IS_WEB = !!globalThis.window;
-var ENVIRONMENT_IS_WORKER = !!globalThis.WorkerGlobalScope;
-var ENVIRONMENT_IS_NODE =
-  globalThis.process?.versions?.node &&
-  globalThis.process?.type !== "renderer";
+var ENVIRONMENT_IS_WEB = typeof window === "object";
 
-var arguments_ = [];
-var thisProgram = "./this.program";
-var quit_ = (status, toThrow) => {
-  throw toThrow;
-};
-
-var _scriptName = globalThis.document?.currentScript?.src;
-if (typeof __filename !== "undefined") {
-  _scriptName = __filename;
-} else if (ENVIRONMENT_IS_WORKER) {
-  _scriptName = self.location.href;
-}
+// ===============================
+// SAFE SCRIPT DIRECTORY (VITE FIX)
+// ===============================
 
 var scriptDirectory = "";
-function locateFile(path) {
-  if (Module["locateFile"]) {
-    return Module["locateFile"](path, scriptDirectory);
+if (ENVIRONMENT_IS_WEB) {
+  // 🔥 THIS IS THE CRITICAL FIX
+  scriptDirectory = new URL(".", import.meta.url).href;
+}
+
+// ===============================
+// FETCH HELPERS
+// ===============================
+
+var readAsync = async (url) => {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to load ${url}`);
   }
-  return scriptDirectory + path;
-}
-
-var readAsync, readBinary;
-
-if (ENVIRONMENT_IS_NODE) {
-  var fs = require("fs");
-  scriptDirectory = __dirname + "/";
-  readBinary = (filename) => fs.readFileSync(filename);
-  readAsync = async (filename) => fs.readFileSync(filename);
-} else if (ENVIRONMENT_IS_WEB || ENVIRONMENT_IS_WORKER) {
-  scriptDirectory = new URL(".", _scriptName).href;
-  readAsync = async (url) => {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(res.statusText);
-    return res.arrayBuffer();
-  };
-}
-
-var out = console.log.bind(console);
-var err = console.error.bind(console);
-
-var wasmBinary;
-var wasmMemory;
-var wasmExports;
-var runtimeInitialized = false;
-
-// --- Memory helpers omitted for brevity (unchanged) ---
+  return response.arrayBuffer();
+};
 
 // ===============================
 // WASM INSTANTIATION
 // ===============================
 
 async function createWasm() {
-  const wasmBinaryFile = locateFile("pes_crypto.wasm");
+  const wasmUrl = Module.locateFile("pes_crypto.wasm");
 
-  const imports = { a: {} };
+  const binary = await readAsync(wasmUrl);
 
-  const binary = await readAsync(wasmBinaryFile);
-  const { instance } = await WebAssembly.instantiate(binary, imports);
+  const { instance } = await WebAssembly.instantiate(binary, {
+    a: {},
+  });
 
-  wasmExports = instance.exports;
-  wasmMemory = wasmExports.memory;
-
-  runtimeInitialized = true;
-
-  return wasmExports;
+  return instance.exports;
 }
 
 // ===============================
-// 🚨 CRITICAL FIXES
+// 🚨 DO NOT AUTO-RUN
 // ===============================
 
-// ❌ REMOVE AUTO EXECUTION
-// createWasm();
-// run();
+// ❌ NO createWasm();
+// ❌ NO run();
 
-// ✅ EXPORT FACTORY FOR VITE
+// ===============================
+// ✅ ESM EXPORT
+// ===============================
+
 export default createWasm;
