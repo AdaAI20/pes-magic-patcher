@@ -28,20 +28,18 @@ interface EditBinState {
 
   rawBuffer: ArrayBuffer | null;
   header: EditBinHeader | null;
-
   players: Player[];
 
-  /* actions */
   loadEditBin: (data: {
-    header: EditBinHeader;
     raw: ArrayBuffer;
+    header: EditBinHeader;
   }) => void;
 
   clear: () => void;
 }
 
 /* ------------------------------------------------------------------ */
-/* BASIC PLAYER PARSER (FOUNDATION) */
+/* BASIC PLAYER PARSER (TEMP) */
 /* ------------------------------------------------------------------ */
 
 function parsePlayers(
@@ -52,50 +50,27 @@ function parsePlayers(
   const players: Player[] = [];
 
   const BASE = header.playerOffset;
-  const STRIDE = 0x80; // temporary
+  const STRIDE = 0x80;
   const count = Math.min(header.playerCount, 200);
 
   for (let i = 0; i < count; i++) {
     const offset = BASE + i * STRIDE;
     if (offset + STRIDE > buffer.byteLength) break;
 
-    const id = view.getUint32(offset + 0x00, true);
-    const teamId = view.getUint16(offset + 0x10, true);
-    const overall = view.getUint8(offset + 0x20);
-    const posRaw = view.getUint8(offset + 0x21);
-
     players.push({
-      id,
-      name: `Player ${id}`,
-      teamId,
-      overall,
-      position: decodePosition(posRaw),
+      id: view.getUint32(offset, true),
+      name: `Player ${i + 1}`,
+      teamId: view.getUint16(offset + 0x10, true),
+      overall: view.getUint8(offset + 0x20),
+      position: "UNK",
     });
   }
 
   return players;
 }
 
-function decodePosition(value: number): string {
-  const map: Record<number, string> = {
-    0x00: "GK",
-    0x01: "CB",
-    0x02: "LB",
-    0x03: "RB",
-    0x04: "DMF",
-    0x05: "CMF",
-    0x06: "AMF",
-    0x07: "LWF",
-    0x08: "RWF",
-    0x09: "SS",
-    0x0a: "CF",
-  };
-
-  return map[value] ?? "UNK";
-}
-
 /* ------------------------------------------------------------------ */
-/* ZUSTAND STORE */
+/* STORE */
 /* ------------------------------------------------------------------ */
 
 export const useEditBinStore = create<EditBinState>()((set) => ({
@@ -104,12 +79,12 @@ export const useEditBinStore = create<EditBinState>()((set) => ({
   header: null,
   players: [],
 
-  loadEditBin: ({ header, raw }) =>
+  loadEditBin: ({ raw, header }) =>
     set(
       produce((state: EditBinState) => {
         state.loaded = true;
-        state.header = header;
         state.rawBuffer = raw;
+        state.header = header;
         state.players = parsePlayers(raw, header);
       })
     ),
