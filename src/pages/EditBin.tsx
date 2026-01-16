@@ -1,67 +1,57 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { initCrypto } from "@/crypto/pesCrypto";
 import { loadEditBin, exportEditBin } from "@/parsers/editBinParser";
-import { Button } from "@/components/ui/button";
 
 export default function EditBin() {
   const [edit, setEdit] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     initCrypto().catch(console.error);
   }, []);
 
-  async function handleLoadFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function load(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
     try {
-      const result = await loadEditBin(file);
-      console.log("EDIT.BIN loaded:", result);
-      setEdit(result);
-      setError(null);
+      const data = await loadEditBin(file);
+      setEdit(data);
+      setError("");
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to load EDIT.BIN");
+      setError(err.message || "Load failed");
     }
   }
 
-  function handleExport() {
+  function save() {
     if (!edit) return;
-
     const blob = exportEditBin(edit.raw);
     const url = URL.createObjectURL(blob);
-
     const a = document.createElement("a");
     a.href = url;
     a.download = "EDIT.BIN";
     a.click();
-
-    URL.revokeObjectURL(url);
   }
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-bold">EDIT.BIN Editor</h1>
+    <div>
+      <h2 className="text-2xl font-bold mb-4">EDIT.BIN Editor</h2>
 
-      <input
-        type="file"
-        accept=".bin"
-        onChange={handleLoadFile}
-        className="block"
-      />
-
-      <Button onClick={handleExport} disabled={!edit}>
-        Export EDIT.BIN
-      </Button>
-
-      {error && <p className="text-red-500">{error}</p>}
+      <input type="file" accept=".bin" onChange={load} />
 
       {edit && (
-        <pre className="bg-gray-900 text-green-300 p-4 rounded text-sm overflow-auto">
+        <>
+          <button onClick={save} className="block mt-4 underline">
+            Export EDIT.BIN
+          </button>
+
+          <pre className="mt-4 bg-black text-green-400 p-3">
 {JSON.stringify(edit.header, null, 2)}
-        </pre>
+          </pre>
+        </>
       )}
+
+      {error && <p className="text-red-500">{error}</p>}
     </div>
   );
 }
