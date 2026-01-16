@@ -37,11 +37,13 @@ const formatSize = (bytes: number) =>
 
 const detectType = (file: File): ImportedFile["type"] => {
   const name = file.name.toLowerCase();
+
   if (name === "edit00000000") return "BIN";
   if (name.endsWith(".bin")) return "BIN";
   if (name.endsWith(".cpk")) return "CPK";
   if (name.endsWith(".ted")) return "TED";
   if (name.endsWith(".dat")) return "DAT";
+
   return "UNKNOWN";
 };
 
@@ -62,30 +64,34 @@ export default function Import() {
 
   const loadEditBinToStore = useEditBinStore((s) => s.loadEditBin);
 
+  /* ----------------------------- CORE LOGIC ----------------------------- */
+
+  const handleEditBin = async (file: File, index: number) => {
+    try {
+      console.log("[IMPORT] Loading EDIT00000000:", file.name);
+
+      await initCrypto();
+
+      const result = await loadEditBin(file);
+
+      console.log("[IMPORT] Parsed header:", result.header);
+
+      loadEditBinToStore({
+        raw: result.raw,
+        header: result.header,
+      });
+
+      updateStatus(index, "loaded");
+    } catch (err) {
+      console.error("[IMPORT] EDIT00000000 failed:", err);
+      updateStatus(index, "error");
+    }
+  };
+
   const updateStatus = (index: number, status: FileStatus) => {
     setFiles((prev) =>
       prev.map((f, i) => (i === index ? { ...f, status } : f))
     );
-  };
-
-  const handleEditBin = async (file: File, index: number) => {
-    try {
-      console.log("Loading EDIT00000000:", file.name);
-
-      await initCrypto();
-      const result = await loadEditBin(file);
-
-      loadEditBinToStore({
-        header: result.header,
-        raw: result.raw,
-      });
-
-      updateStatus(index, "loaded");
-      console.log("EDIT00000000 loaded successfully");
-    } catch (err) {
-      console.error("EDIT00000000 failed:", err);
-      updateStatus(index, "error");
-    }
   };
 
   const addFiles = (fileList: FileList | null) => {
@@ -104,6 +110,7 @@ export default function Import() {
 
     incoming.forEach((item, i) => {
       const index = baseIndex + i;
+
       if (item.type === "BIN" && item.file.name === "EDIT00000000") {
         handleEditBin(item.file, index);
       }
@@ -113,6 +120,8 @@ export default function Import() {
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
+
+  /* ------------------------------- UI -------------------------------- */
 
   return (
     <div className="space-y-6">
@@ -145,10 +154,15 @@ export default function Import() {
         )}
       >
         <Upload className="w-10 h-10 mx-auto mb-4 text-primary" />
+        <h3 className="text-xl font-semibold mb-2">
+          Drop files here or click to browse
+        </h3>
+
         <Button variant="gaming" size="lg">
           <FolderOpen className="w-5 h-5 mr-2" />
           Browse Files
         </Button>
+
         <input
           ref={fileInputRef}
           type="file"
@@ -160,29 +174,30 @@ export default function Import() {
 
       {files.length > 0 && (
         <div className="space-y-4">
-          <h2 className="section-title">Import Queue</h2>
-
           {files.map((file, index) => {
             const Icon = iconByType[file.type];
+
             return (
               <div
                 key={index}
                 className="card-gaming p-4 flex items-center gap-4"
               >
-                <div className="p-2 rounded-lg bg-secondary">
-                  <Icon className="w-5 h-5" />
-                </div>
+                <Icon className="w-5 h-5" />
 
                 <div className="flex-1">
                   <p className="font-medium">{file.name}</p>
                   <p className="text-xs text-muted-foreground">{file.size}</p>
                 </div>
 
-                <span className="text-xs font-mono px-2 py-1 rounded bg-secondary">
+                <span className="text-xs font-mono">
                   {file.status.toUpperCase()}
                 </span>
 
-                <Button variant="ghost" size="icon" onClick={() => removeFile(index)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeFile(index)}
+                >
                   <X className="w-4 h-4" />
                 </Button>
               </div>
