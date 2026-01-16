@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   Home,
@@ -24,6 +23,11 @@ interface NavItem {
   path: string;
 }
 
+interface SidebarProps {
+  collapsed: boolean;
+  onToggle(): void;
+}
+
 const mainNavItems: NavItem[] = [
   { icon: Home, label: "Dashboard", path: "/" },
   { icon: Users, label: "Players", path: "/players" },
@@ -44,8 +48,7 @@ const toolsNavItems: NavItem[] = [
   { icon: FolderOpen, label: "File Browser", path: "/file-browser" },
 ];
 
-function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const location = useLocation();
 
   const NavLink = ({ item }: { item: NavItem }) => {
@@ -141,7 +144,7 @@ function Sidebar() {
         </Link>
 
         <button
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={onToggle}
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
         >
           {collapsed ? (
