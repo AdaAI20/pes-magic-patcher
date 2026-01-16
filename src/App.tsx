@@ -1,51 +1,43 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { MainLayout } from "@/components/layout/MainLayout";
-import Dashboard from "./pages/Dashboard";
-import Players from "./pages/Players";
-import Teams from "./pages/Teams";
-import Leagues from "./pages/Leagues";
-import Faces from "./pages/Faces";
-import Kits from "./pages/Kits";
-import Balls from "./pages/Balls";
-import Import from "./pages/Import";
-import Export from "./pages/Export";
-import PatchBuilder from "./pages/PatchBuilder";
-import FileBrowser from "./pages/FileBrowser";
-import SettingsPage from "./pages/Settings";
+import { Routes, Route, NavLink } from "react-router-dom";
+import Home from "./pages/Home";
+import OptionFiles from "./pages/OptionFiles";
+import Edit00000000 from "./pages/Edit00000000";
 import NotFound from "./pages/NotFound";
+import Teams from "./pages/Teams";
+import Players from "./pages/Players";
 
-const queryClient = new QueryClient();
+export default function App() {
+  return (
+    <div className="min-h-screen flex flex-col bg-gray-100">
+      <header className="bg-white shadow-md p-4 flex gap-4">
+        <NavLink to="/" className="font-bold hover:underline">
+          Home
+        </NavLink>
+        <NavLink to="/option-files" className="hover:underline">
+          Option Files
+        </NavLink>
+        <NavLink to="/edit00000000" className="hover:underline">
+          EDIT00000000
+        </NavLink>
+        <NavLink to="/teams" className="hover:underline">
+          Teams
+        </NavLink>
+        <NavLink to="/players" className="hover:underline">
+          Players
+        </NavLink>
+      </header>
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <MainLayout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/players" element={<Players />} />
-            <Route path="/teams" element={<Teams />} />
-            <Route path="/leagues" element={<Leagues />} />
-            <Route path="/faces" element={<Faces />} />
-            <Route path="/kits" element={<Kits />} />
-            <Route path="/balls" element={<Balls />} />
-            <Route path="/import" element={<Import />} />
-            <Route path="/export" element={<Export />} />
-            <Route path="/patch-builder" element={<PatchBuilder />} />
-            <Route path="/file-browser" element={<FileBrowser />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </MainLayout>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+      <main className="flex-1 p-6">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/option-files" element={<OptionFiles />} />
+          <Route path="/edit00000000" element={<Edit00000000 />} />
+          <Route path="/teams" element={<Teams />} />
+          <Route path="/players" element={<Players />} />
 
-export default App;
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
