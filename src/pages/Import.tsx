@@ -12,7 +12,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-/* 🔑 CORE IMPORTS */
 import { initCrypto } from "@/crypto/pesCrypto";
 import { loadEditBin } from "@/parsers/editBinParser";
 import { useEditBinStore } from "@/store/editBinStore";
@@ -39,7 +38,7 @@ const formatSize = (bytes: number) =>
 const detectType = (file: File): ImportedFile["type"] => {
   const name = file.name.toLowerCase();
 
-  if (name.startsWith("edit00000000")) return "BIN";
+  if (name === "edit00000000") return "BIN";
   if (name.endsWith(".bin")) return "BIN";
   if (name.endsWith(".cpk")) return "CPK";
   if (name.endsWith(".ted")) return "TED";
@@ -63,21 +62,26 @@ export default function Import() {
   const [dragActive, setDragActive] = useState(false);
   const [files, setFiles] = useState<ImportedFile[]>([]);
 
-  /* 🌍 GLOBAL STORE */
+  /* ✅ CORRECT STORE ACTION */
   const loadIntoStore = useEditBinStore((s) => s.loadEditBin);
 
-  /* ----------------------------- CORE LOGIC ----------------------------- */
+  const updateStatus = (index: number, status: FileStatus) => {
+    setFiles((prev) =>
+      prev.map((f, i) => (i === index ? { ...f, status } : f))
+    );
+  };
 
   const handleEditBin = async (file: File, index: number) => {
     try {
       console.log("Loading EDIT00000000:", file.name);
 
       await initCrypto();
+
       const result = await loadEditBin(file);
 
       loadIntoStore({
-        raw: result.raw,
         header: result.header,
+        raw: result.raw,
       });
 
       console.log("EDIT00000000 loaded into store:", result.header);
@@ -89,13 +93,7 @@ export default function Import() {
     }
   };
 
-  const updateStatus = (index: number, status: FileStatus) => {
-    setFiles((prev) =>
-      prev.map((f, i) => (i === index ? { ...f, status } : f))
-    );
-  };
-
-  const addFiles = async (fileList: FileList | null) => {
+  const addFiles = (fileList: FileList | null) => {
     if (!fileList) return;
 
     const incoming: ImportedFile[] = Array.from(fileList).map((file) => ({
@@ -109,12 +107,10 @@ export default function Import() {
     const baseIndex = files.length;
     setFiles((prev) => [...prev, ...incoming]);
 
-    /* 🔥 PROCESS FILES */
     incoming.forEach((item, i) => {
       const index = baseIndex + i;
-      const normalized = item.file.name.toUpperCase();
 
-      if (item.type === "BIN" && normalized.startsWith("EDIT00000000")) {
+      if (item.type === "BIN" && item.file.name === "EDIT00000000") {
         handleEditBin(item.file, index);
       }
     });
@@ -124,21 +120,15 @@ export default function Import() {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  /* ------------------------------- UI -------------------------------- */
-
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
-        <h1 className="text-3xl font-display font-bold">
-          Import <span className="text-gradient-primary">Files</span>
-        </h1>
+        <h1 className="text-3xl font-bold">Import Files</h1>
         <p className="text-muted-foreground">
           Supports EDIT00000000, CPK archives, and team data
         </p>
       </div>
 
-      {/* Drop zone */}
       <div
         onClick={() => fileInputRef.current?.click()}
         onDragOver={(e) => {
@@ -152,21 +142,12 @@ export default function Import() {
           addFiles(e.dataTransfer.files);
         }}
         className={cn(
-          "card-gaming border-2 border-dashed p-12 text-center cursor-pointer transition-all",
-          dragActive
-            ? "border-primary bg-primary/10"
-            : "border-border hover:border-primary/40"
+          "border-2 border-dashed p-12 text-center cursor-pointer",
+          dragActive ? "border-primary" : "border-border"
         )}
       >
-        <Upload className="w-10 h-10 mx-auto mb-4 text-primary" />
-        <h3 className="text-xl font-semibold mb-2">
-          Drop files here or click to browse
-        </h3>
-        <p className="text-muted-foreground mb-4">
-          EDIT00000000 • .bin • .cpk • .ted • .dat
-        </p>
-
-        <Button variant="gaming" size="lg">
+        <Upload className="w-10 h-10 mx-auto mb-4" />
+        <Button>
           <FolderOpen className="w-5 h-5 mr-2" />
           Browse Files
         </Button>
@@ -180,53 +161,19 @@ export default function Import() {
         />
       </div>
 
-      {/* Import Queue */}
-      {files.length > 0 && (
-        <div className="space-y-4">
-          <h2 className="section-title">Import Queue</h2>
-
-          {files.map((file, index) => {
-            const Icon = iconByType[file.type];
-
-            return (
-              <div
-                key={index}
-                className="card-gaming p-4 flex items-center gap-4"
-              >
-                <div className="p-2 rounded-lg bg-secondary">
-                  <Icon className="w-5 h-5" />
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">{file.size}</p>
-                </div>
-
-                <span
-                  className={cn(
-                    "text-xs font-mono px-2 py-1 rounded",
-                    file.status === "loaded" &&
-                      "bg-success/20 text-success",
-                    file.status === "error" &&
-                      "bg-destructive/20 text-destructive",
-                    file.status === "pending" && "bg-secondary"
-                  )}
-                >
-                  {file.status.toUpperCase()}
-                </span>
-
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => removeFile(index)}
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {files.map((file, index) => {
+        const Icon = iconByType[file.type];
+        return (
+          <div key={index} className="flex items-center gap-4">
+            <Icon />
+            <span>{file.name}</span>
+            <span>{file.status.toUpperCase()}</span>
+            <Button onClick={() => removeFile(index)} size="icon">
+              <X />
+            </Button>
+          </div>
+        );
+      })}
     </div>
   );
 }
