@@ -1,54 +1,42 @@
-import * as Module from "../wasm/pes_crypto.js";
-import { PES_EDIT_KEY } from "./keys";
+import createPesCryptoModule from "../wasm/pes_crypto.js";
 
-// Emscripten initializes automatically
-export async function initCrypto() {
-  // nothing to do, but keeps UI happy
-  return true;
+let wasmModule = null;
+
+async function getModule() {
+  if (!wasmModule) {
+    wasmModule = await createPesCryptoModule();
+  }
+  return wasmModule;
 }
 
-export function decryptEditBin(buffer) {
-  const input = new Uint8Array(buffer);
-  const len = input.length;
+export async function decrypt(buffer) {
+  const Module = await getModule();
 
-  // Allocate memory
-  const dataPtr = Module._malloc(len);
-  const keyPtr = Module._malloc(PES_EDIT_KEY.length);
+  const inputPtr = Module._malloc(buffer.length);
+  Module.HEAPU8.set(buffer, inputPtr);
 
-  // Copy data
-  Module.HEAPU8.set(input, dataPtr);
-  Module.HEAPU8.set(PES_EDIT_KEY, keyPtr);
+  const outputPtr = Module._decrypt(inputPtr, buffer.length);
 
-  // CALL REAL PES DECRYPT
-  // Signature: decrypt(dataPtr, size, keyPtr)
-  Module._decrypt(dataPtr, len, keyPtr);
+  const result = Module.HEAPU8.slice(outputPtr, outputPtr + buffer.length);
 
-  // Read back result
-  const output = Module.HEAPU8.slice(dataPtr, dataPtr + len);
+  Module._free(inputPtr);
+  Module._free(outputPtr);
 
-  // Free memory
-  Module._free(dataPtr);
-  Module._free(keyPtr);
-
-  return output.buffer;
+  return result;
 }
 
-export function encryptEditBin(buffer) {
-  const input = new Uint8Array(buffer);
-  const len = input.length;
+export async function encrypt(buffer) {
+  const Module = await getModule();
 
-  const dataPtr = Module._malloc(len);
-  const keyPtr = Module._malloc(PES_EDIT_KEY.length);
+  const inputPtr = Module._malloc(buffer.length);
+  Module.HEAPU8.set(buffer, inputPtr);
 
-  Module.HEAPU8.set(input, dataPtr);
-  Module.HEAPU8.set(PES_EDIT_KEY, keyPtr);
+  const outputPtr = Module._encrypt(inputPtr, buffer.length);
 
-  Module._encrypt(dataPtr, len, keyPtr);
+  const result = Module.HEAPU8.slice(outputPtr, outputPtr + buffer.length);
 
-  const output = Module.HEAPU8.slice(dataPtr, dataPtr + len);
+  Module._free(inputPtr);
+  Module._free(outputPtr);
 
-  Module._free(dataPtr);
-  Module._free(keyPtr);
-
-  return output.buffer;
+  return result;
 }
