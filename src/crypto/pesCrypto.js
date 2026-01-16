@@ -1,6 +1,6 @@
 /* eslint-disable */
 
-/**
+/*
  * PES Crypto Wrapper
  * - Works with Vite
  * - Works in production
@@ -14,22 +14,23 @@
 import "../wasm/pes_crypto.js";
 
 /* ------------------------------------------------------------------ */
-/* 2. FORCE WASM PATH (VITE + GH PAGES SAFE) */
+/* 2. FORCE WASM PATH (GITHUB PAGES SAFE) */
 /* ------------------------------------------------------------------ */
 
 if (typeof window !== "undefined") {
   window.Module = window.Module || {};
-  window.Module.locateFile = () => "/pes_crypto.wasm";
-}
 
-/* ------------------------------------------------------------------ */
-/* 3. INTERNAL STATE */
-/* ------------------------------------------------------------------ */
+  // Always resolve the WASM relative to the GH Pages path
+  window.Module.locateFile = (path) => {
+    console.log("Looking for WASM file at:", path);
+    return `/pes-magic-patcher/${path}`;
+  };
+}
 
 let cryptoReady = false;
 
 /* ------------------------------------------------------------------ */
-/* 4. INIT FUNCTION (USED BY React) */
+/* INIT FUNCTION (USED BY React) */
 /* ------------------------------------------------------------------ */
 
 export async function initCrypto() {
@@ -39,16 +40,17 @@ export async function initCrypto() {
     throw new Error("PES crypto module not loaded");
   }
 
-  await new Promise((resolve) => {
+  await new Promise((resolve, reject) => {
     window.Module.onRuntimeInitialized = () => {
       cryptoReady = true;
+      console.log("Crypto runtime initialized");
       resolve();
     };
   });
 }
 
 /* ------------------------------------------------------------------ */
-/* 5. CRYPTO HELPERS */
+/* CRYPTO HELPERS */
 /* ------------------------------------------------------------------ */
 
 export function decryptEditBin(buffer) {
@@ -59,11 +61,7 @@ export function decryptEditBin(buffer) {
   const input = new Uint8Array(buffer);
   const output = new Uint8Array(input.length);
 
-  window.Module._decrypt(
-    input.byteOffset,
-    output.byteOffset,
-    input.length
-  );
+  window.Module._decrypt(input.byteOffset, output.byteOffset, input.length);
 
   return output.buffer;
 }
@@ -76,11 +74,7 @@ export function encryptEditBin(buffer) {
   const input = new Uint8Array(buffer);
   const output = new Uint8Array(input.length);
 
-  window.Module._encrypt(
-    input.byteOffset,
-    output.byteOffset,
-    input.length
-  );
+  window.Module._encrypt(input.byteOffset, output.byteOffset, input.length);
 
   return output.buffer;
 }
