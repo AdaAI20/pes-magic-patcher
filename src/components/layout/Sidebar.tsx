@@ -44,7 +44,7 @@ const toolsNavItems: NavItem[] = [
   { icon: FolderOpen, label: "File Browser", path: "/file-browser" },
 ];
 
-export function Sidebar() {
+function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
 
@@ -134,9 +134,7 @@ export function Sidebar() {
       <div className="p-3 border-t border-sidebar-border space-y-2">
         <Link
           to="/settings"
-          className={cn(
-            "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-muted-foreground hover:text-foreground hover:bg-secondary"
-          )}
+          className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-muted-foreground hover:text-foreground hover:bg-secondary"
         >
           <Settings className="w-5 h-5 shrink-0" />
           {!collapsed && <span className="font-medium text-sm">Settings</span>}
@@ -159,3 +157,5 @@ export function Sidebar() {
     </aside>
   );
 }
+
+export default Sidebar;
