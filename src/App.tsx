@@ -5,14 +5,14 @@ import OptionFile from "./pages/OptionFile";
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <BrowserRouter>
+    <BrowserRouter basename="/pes-magic-patcher">
+      <div className="min-h-screen bg-background text-foreground">
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/edit-bin" element={<EditBin />} />
           <Route path="/option-file" element={<OptionFile />} />
         </Routes>
-      </BrowserRouter>
-    </div>
+      </div>
+    </BrowserRouter>
   );
 }
