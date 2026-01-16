@@ -1,23 +1,33 @@
 import createPesCryptoModule from "../wasm/pes_crypto.js";
 
-let wasmModule = null;
+let modulePromise = null;
 
+/**
+ * Initialize WASM module once
+ */
 async function getModule() {
-  if (!wasmModule) {
-    wasmModule = await createPesCryptoModule();
+  if (!modulePromise) {
+    modulePromise = createPesCryptoModule();
   }
-  return wasmModule;
+  return modulePromise;
 }
 
-export async function decrypt(buffer) {
+/**
+ * Decrypt PES edit.bin
+ * @param {Uint8Array} data
+ * @returns {Uint8Array}
+ */
+export async function decryptEditBin(data) {
   const Module = await getModule();
 
-  const inputPtr = Module._malloc(buffer.length);
-  Module.HEAPU8.set(buffer, inputPtr);
+  const size = data.length;
+  const inputPtr = Module._malloc(size);
+  const outputPtr = Module._malloc(size);
 
-  const outputPtr = Module._decrypt(inputPtr, buffer.length);
+  Module.HEAPU8.set(data, inputPtr);
+  Module._decrypt(inputPtr, outputPtr, size);
 
-  const result = Module.HEAPU8.slice(outputPtr, outputPtr + buffer.length);
+  const result = new Uint8Array(Module.HEAPU8.subarray(outputPtr, outputPtr + size));
 
   Module._free(inputPtr);
   Module._free(outputPtr);
@@ -25,15 +35,22 @@ export async function decrypt(buffer) {
   return result;
 }
 
-export async function encrypt(buffer) {
+/**
+ * Encrypt PES edit.bin
+ * @param {Uint8Array} data
+ * @returns {Uint8Array}
+ */
+export async function encryptEditBin(data) {
   const Module = await getModule();
 
-  const inputPtr = Module._malloc(buffer.length);
-  Module.HEAPU8.set(buffer, inputPtr);
+  const size = data.length;
+  const inputPtr = Module._malloc(size);
+  const outputPtr = Module._malloc(size);
 
-  const outputPtr = Module._encrypt(inputPtr, buffer.length);
+  Module.HEAPU8.set(data, inputPtr);
+  Module._encrypt(inputPtr, outputPtr, size);
 
-  const result = Module.HEAPU8.slice(outputPtr, outputPtr + buffer.length);
+  const result = new Uint8Array(Module.HEAPU8.subarray(outputPtr, outputPtr + size));
 
   Module._free(inputPtr);
   Module._free(outputPtr);
