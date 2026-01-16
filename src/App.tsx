@@ -1,18 +1,22 @@
 import { HashRouter, Routes, Route } from "react-router-dom";
-import Home from "./pages/Home";
-import EditBin from "./pages/EditBin";
-import OptionFile from "./pages/OptionFile";
+import { MainLayout } from "@/components/layout/MainLayout";
+
+import Dashboard from "@/pages/Dashboard";
+import Import from "@/pages/Import";
+import EditBin from "@/pages/EditBin";
+import NotFound from "@/pages/NotFound";
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <HashRouter>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/import" element={<OptionFile />} />
+    <HashRouter>
+      <Routes>
+        <Route element={<MainLayout />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/import" element={<Import />} />
           <Route path="/edit-bin" element={<EditBin />} />
-        </Routes>
-      </HashRouter>
-    </div>
+          <Route path="*" element={<NotFound />} />
+        </Route>
+      </Routes>
+    </HashRouter>
   );
 }
