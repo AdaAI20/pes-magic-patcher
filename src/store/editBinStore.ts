@@ -1,9 +1,7 @@
 import { create } from "zustand";
-import { produce } from "immer";
+import { loadEditBin } from "@/parsers/editBinParser";
 
-/* ------------------------------------------------------------------ */
-/* TYPES */
-/* ------------------------------------------------------------------ */
+/* -------------------------------- TYPES -------------------------------- */
 
 export interface EditBinHeader {
   magic: number;
@@ -15,124 +13,37 @@ export interface EditBinHeader {
   leagueOffset: number;
 }
 
-export interface Player {
-  id: number;
-  name: string;
-  teamId: number;
-  overall: number;
-  position: string;
-}
-
 interface EditBinState {
   loaded: boolean;
-
-  rawBuffer: ArrayBuffer | null;
   header: EditBinHeader | null;
+  rawBuffer: ArrayBuffer | null;
 
-  players: Player[];
-
-  /* actions */
-  loadEditBin: (data: {
-    header: EditBinHeader;
-    raw: ArrayBuffer;
-  }) => void;
-
-  clear: () => void;
+  loadFromFile: (file: File) => Promise<void>;
+  reset: () => void;
 }
 
-/* ------------------------------------------------------------------ */
-/* VERY BASIC PLAYER PARSER (FOUNDATION) */
-/* ------------------------------------------------------------------ */
-/**
- * ⚠️ IMPORTANT
- * This does NOT fully decode PES players yet.
- * It just proves:
- * - EDIT00000000 is loaded
- * - player table is reachable
- * - UI can consume real data
- */
+/* ------------------------------- STORE ---------------------------------- */
 
-function parsePlayers(
-  buffer: ArrayBuffer,
-  header: EditBinHeader
-): Player[] {
-  const view = new DataView(buffer);
-  const players: Player[] = [];
-
-  const BASE = header.playerOffset;
-  const STRIDE = 0x80; // placeholder stride (will refine later)
-
-  const count = Math.min(header.playerCount, 200); // safety limit
-
-  for (let i = 0; i < count; i++) {
-    const offset = BASE + i * STRIDE;
-
-    if (offset + STRIDE > buffer.byteLength) break;
-
-    const id = view.getUint32(offset + 0x00, true);
-    const overall = view.getUint8(offset + 0x20);
-    const posRaw = view.getUint8(offset + 0x21);
-
-    players.push({
-      id,
-      name: `Player ${id}`, // name decoding comes later
-      teamId: view.getUint16(offset + 0x10, true),
-      overall,
-      position: decodePosition(posRaw),
-    });
-  }
-
-  return players;
-}
-
-/* ------------------------------------------------------------------ */
-/* POSITION DECODER (TEMP) */
-/* ------------------------------------------------------------------ */
-
-function decodePosition(value: number): string {
-  const map: Record<number, string> = {
-    0x00: "GK",
-    0x01: "CB",
-    0x02: "LB",
-    0x03: "RB",
-    0x04: "DMF",
-    0x05: "CMF",
-    0x06: "AMF",
-    0x07: "LWF",
-    0x08: "RWF",
-    0x09: "SS",
-    0x0a: "CF",
-  };
-
-  return map[value] ?? "UNK";
-}
-
-/* ------------------------------------------------------------------ */
-/* ZUSTAND STORE */
-/* ------------------------------------------------------------------ */
-
-export const useEditBinStore = create<EditBinState>()((set) => ({
+export const useEditBinStore = create<EditBinState>((set) => ({
   loaded: false,
-
-  rawBuffer: null,
   header: null,
-  players: [],
+  rawBuffer: null,
 
-  loadEditBin: ({ header, raw }) =>
-    set(
-      produce((state: EditBinState) => {
-        state.loaded = true;
-        state.header = header;
-        state.rawBuffer = raw;
-        state.players = parsePlayers(raw, header);
-      })
-    ),
+  async loadFromFile(file) {
+    const result = await loadEditBin(file);
 
-  clear: () =>
+    set({
+      loaded: true,
+      header: result.header,
+      rawBuffer: result.raw,
+    });
+  },
+
+  reset() {
     set({
       loaded: false,
-      rawBuffer: null,
       header: null,
-      players: [],
-    }),
+      rawBuffer: null,
+    });
+  },
 }));
