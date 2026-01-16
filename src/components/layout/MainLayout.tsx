@@ -1,17 +1,21 @@
-import { ReactNode } from "react";
-import { Sidebar } from "./Sidebar";
+import { Outlet } from "react-router-dom";
+import Sidebar from "./Sidebar";
+import TopNavbar from "./TopNavbar";
 
-interface MainLayoutProps {
-  children: ReactNode;
-}
-
-export function MainLayout({ children }: MainLayoutProps) {
+export default function MainLayout() {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+      {/* Sidebar */}
       <Sidebar />
-      <main className="ml-60 min-h-screen">
-        <div className="p-6">{children}</div>
-      </main>
+
+      {/* Main content */}
+      <div className="flex flex-1 flex-col">
+        <TopNavbar />
+
+        <main className="flex-1 overflow-auto p-6">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }
