@@ -1,3 +1,5 @@
+const store = useEditBinStore.getState();
+console.log("[DEBUG STORE ACTIONS]", Object.keys(store));
 import { useRef, useState } from "react";
 import {
   Upload,
