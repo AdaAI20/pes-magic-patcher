@@ -1,39 +1,89 @@
-/* =========================================================
-   PES CRYPTO — TEMP DEBUG / NO-OP VERSION (GitHub Pages)
-   ========================================================= */
-
-console.log("[CRYPTO] pesCrypto module loaded");
+/* eslint-disable */
 
 /**
- * TEMP: Skip real crypto for now
- * Reason:
- * - WASM fails silently on GitHub Pages
- * - We must unblock EDIT loading first
+ * PES Crypto Wrapper (GitHub Pages SAFE)
  */
 
-let initialized = false;
+import "../wasm/pes_crypto.js";
 
-export async function initCrypto(): Promise<void> {
-  console.warn("[CRYPTO] initCrypto() SKIPPED (debug mode)");
-  initialized = true;
+declare global {
+  interface Window {
+    Module: any;
+  }
 }
 
-/**
- * TEMP: Return raw buffer untouched
- */
-export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
-  if (!initialized) {
-    console.warn("[CRYPTO] decryptEditBin called before initCrypto");
+let cryptoReady = false;
+
+/* -------------------------------------------------- */
+/* 🔥 RESOLVE WASM PATH (Vite + GitHub Pages) */
+/* -------------------------------------------------- */
+function resolveWasmPath() {
+  const base = import.meta.env.BASE_URL || "/";
+  return `${base.replace(/\/$/, "")}/pes_crypto.wasm`;
+}
+
+export async function initCrypto() {
+  if (cryptoReady) return;
+
+  if (typeof window === "undefined") {
+    throw new Error("Crypto can only run in browser");
   }
 
-  console.log("[CRYPTO] decryptEditBin passthrough");
-  return buffer;
+  window.Module = window.Module || {};
+  window.Module.locateFile = () => {
+    const path = resolveWasmPath();
+    console.log("[CRYPTO] WASM path resolved:", path);
+    return path;
+  };
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("WASM load timeout"));
+    }, 8000);
+
+    window.Module.onRuntimeInitialized = () => {
+      clearTimeout(timeout);
+      cryptoReady = true;
+      console.log("[CRYPTO] Runtime initialized");
+      resolve();
+    };
+  });
 }
 
-/**
- * TEMP: Return raw buffer untouched
- */
+/* -------------------------------------------------- */
+/* CRYPTO FUNCTIONS */
+/* -------------------------------------------------- */
+
+export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
+  if (!cryptoReady) {
+    throw new Error("Crypto not initialized");
+  }
+
+  const input = new Uint8Array(buffer);
+  const output = new Uint8Array(input.length);
+
+  window.Module._decrypt(
+    input.byteOffset,
+    output.byteOffset,
+    input.length
+  );
+
+  return output.buffer;
+}
+
 export function encryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
-  console.log("[CRYPTO] encryptEditBin passthrough");
-  return buffer;
+  if (!cryptoReady) {
+    throw new Error("Crypto not initialized");
+  }
+
+  const input = new Uint8Array(buffer);
+  const output = new Uint8Array(input.length);
+
+  window.Module._encrypt(
+    input.byteOffset,
+    output.byteOffset,
+    input.length
+  );
+
+  return output.buffer;
 }
