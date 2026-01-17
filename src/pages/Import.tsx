@@ -1,5 +1,3 @@
-const store = useEditBinStore.getState();
-console.log("[DEBUG STORE ACTIONS]", Object.keys(store));
 import { useRef, useState } from "react";
 import {
   Upload,
@@ -23,6 +21,7 @@ import { useEditBinStore } from "@/store/editBinStore";
 type FileStatus = "pending" | "loaded" | "error";
 
 interface ImportedFile {
+  id: string;
   file: File;
   name: string;
   size: string;
@@ -66,41 +65,41 @@ export default function Import() {
 
   /* ----------------------------- CORE LOGIC ----------------------------- */
 
-  const handleEditBin = async (file: File, index: number) => {
+  const handleEditBin = async (item: ImportedFile) => {
     console.log("[IMPORT] Handling EDIT00000000");
 
     try {
       await initCrypto();
-
-      console.log("[IMPORT] Reading file...");
-      const result = await loadEditBin(file);
-
-      console.log("[IMPORT] Parsed header:", result.header);
+      const result = await loadEditBin(item.file);
 
       loadEditBinToStore({
         header: result.header,
         raw: result.raw,
       });
 
-      console.log("[IMPORT] Stored EDIT00000000 in Zustand");
+      console.log("[IMPORT] EDIT00000000 stored in Zustand");
 
-      updateStatus(index, "loaded");
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === item.id ? { ...f, status: "loaded" } : f
+        )
+      );
     } catch (err) {
       console.error("[IMPORT] FAILED:", err);
-      updateStatus(index, "error");
-    }
-  };
 
-  const updateStatus = (index: number, status: FileStatus) => {
-    setFiles((prev) =>
-      prev.map((f, i) => (i === index ? { ...f, status } : f))
-    );
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === item.id ? { ...f, status: "error" } : f
+        )
+      );
+    }
   };
 
   const addFiles = (fileList: FileList | null) => {
     if (!fileList) return;
 
     const incoming: ImportedFile[] = Array.from(fileList).map((file) => ({
+      id: crypto.randomUUID(),
       file,
       name: file.name,
       size: formatSize(file.size),
@@ -108,19 +107,17 @@ export default function Import() {
       status: "pending",
     }));
 
-    const baseIndex = files.length;
     setFiles((prev) => [...prev, ...incoming]);
 
-    incoming.forEach((item, i) => {
-      const index = baseIndex + i;
-      if (item.type === "BIN" && item.file.name === "EDIT00000000") {
-        handleEditBin(item.file, index);
+    incoming.forEach((item) => {
+      if (item.type === "BIN" && item.name === "EDIT00000000") {
+        handleEditBin(item);
       }
     });
   };
 
-  const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
+  const removeFile = (id: string) => {
+    setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
   /* ------------------------------- UI -------------------------------- */
@@ -159,9 +156,6 @@ export default function Import() {
         <h3 className="text-xl font-semibold mb-2">
           Drop files here or click to browse
         </h3>
-        <p className="text-muted-foreground mb-4">
-          EDIT00000000 • .bin • .cpk • .ted • .dat
-        </p>
 
         <Button variant="gaming" size="lg">
           <FolderOpen className="w-5 h-5 mr-2" />
@@ -181,12 +175,12 @@ export default function Import() {
         <div className="space-y-4">
           <h2 className="section-title">Import Queue</h2>
 
-          {files.map((file, index) => {
+          {files.map((file) => {
             const Icon = iconByType[file.type];
 
             return (
               <div
-                key={index}
+                key={file.id}
                 className="card-gaming p-4 flex items-center gap-4"
               >
                 <div className="p-2 rounded-lg bg-secondary">
@@ -214,7 +208,7 @@ export default function Import() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => removeFile(index)}
+                  onClick={() => removeFile(file.id)}
                 >
                   <X className="w-4 h-4" />
                 </Button>
