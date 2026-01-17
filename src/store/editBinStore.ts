@@ -24,6 +24,7 @@ export interface Player {
 }
 
 interface EditBinState {
+  /** true when EDIT00000000 is successfully loaded */
   loaded: boolean;
 
   rawBuffer: ArrayBuffer | null;
@@ -31,6 +32,7 @@ interface EditBinState {
 
   players: Player[];
 
+  /** ACTIONS */
   loadEditBin: (data: {
     header: EditBinHeader;
     raw: ArrayBuffer;
@@ -40,8 +42,15 @@ interface EditBinState {
 }
 
 /* ------------------------------------------------------------------ */
-/* PLAYER PARSER (FOUNDATION) */
+/* PLAYER PARSER (FOUNDATION — SAFE & MINIMAL) */
 /* ------------------------------------------------------------------ */
+/**
+ * ⚠️ This is intentionally SIMPLE.
+ * It only proves:
+ * - EDIT00000000 decrypted correctly
+ * - playerOffset is valid
+ * - Zustand receives real data
+ */
 
 function parsePlayers(
   buffer: ArrayBuffer,
@@ -51,14 +60,23 @@ function parsePlayers(
   const players: Player[] = [];
 
   const BASE = header.playerOffset;
-  const STRIDE = 0x80; // placeholder, refined later
+  const STRIDE = 0x80; // placeholder (safe minimum)
+  const MAX = Math.min(header.playerCount, 200);
 
-  const count = Math.min(header.playerCount, 200);
+  console.log("[STORE] Parsing players", {
+    base: BASE,
+    stride: STRIDE,
+    count: MAX,
+    bufferSize: buffer.byteLength,
+  });
 
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < MAX; i++) {
     const offset = BASE + i * STRIDE;
 
-    if (offset + STRIDE > buffer.byteLength) break;
+    if (offset + STRIDE > buffer.byteLength) {
+      console.warn("[STORE] Player offset out of bounds", offset);
+      break;
+    }
 
     const id = view.getUint32(offset + 0x00, true);
     const teamId = view.getUint16(offset + 0x10, true);
@@ -67,12 +85,14 @@ function parsePlayers(
 
     players.push({
       id,
-      name: `Player ${id}`,
+      name: `Player ${id}`, // real name decoding later
       teamId,
       overall,
       position: decodePosition(posRaw),
     });
   }
+
+  console.log("[STORE] Players parsed:", players.length);
 
   return players;
 }
@@ -100,10 +120,10 @@ function decodePosition(value: number): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* ZUSTAND STORE */
+/* ZUSTAND STORE (FINAL, EXPLICIT, DEBUGGED) */
 /* ------------------------------------------------------------------ */
 
-export const useEditBinStore = create<EditBinState>()((set) => ({
+export const useEditBinStore = create<EditBinState>()((set, get) => ({
   loaded: false,
 
   rawBuffer: null,
@@ -113,23 +133,42 @@ export const useEditBinStore = create<EditBinState>()((set) => ({
   loadEditBin: ({ header, raw }) =>
     set(
       produce((state: EditBinState) => {
-        console.log("[STORE] EDIT00000000 loaded", {
-          fileSize: raw.byteLength,
-          players: header.playerCount,
-        });
+        console.log("[STORE] loadEditBin CALLED");
+        console.log("[STORE] Header:", header);
+        console.log("[STORE] Raw size:", raw.byteLength);
 
         state.loaded = true;
         state.header = header;
         state.rawBuffer = raw;
         state.players = parsePlayers(raw, header);
+
+        console.log("[STORE] State after load:", {
+          loaded: state.loaded,
+          players: state.players.length,
+        });
       })
     ),
 
-  clear: () =>
+  clear: () => {
+    console.log("[STORE] CLEAR");
     set({
       loaded: false,
       rawBuffer: null,
       header: null,
       players: [],
-    }),
+    });
+  },
 }));
+
+/* ------------------------------------------------------------------ */
+/* 🔥 HARD GLOBAL DEBUG (TEMP — VERY IMPORTANT) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * This lets us inspect the store from the browser console:
+ * window.__EDIT_STORE__.getState()
+ */
+if (typeof window !== "undefined") {
+  (window as any).__EDIT_STORE__ = useEditBinStore;
+  console.log("[STORE] Debug hook installed: window.__EDIT_STORE__");
+}
