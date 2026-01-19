@@ -1,14 +1,16 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+
 // Pure JS. No imports. No WASM.
 let cryptoReady = false;
 
 export async function initCrypto() {
-  console.log("[CRYPTO] Init called.");
+  console.log("🔥 NUCLEAR FIX: initCrypto CALLED 🔥"); // Look for this in console!
   cryptoReady = true;
   return Promise.resolve();
 }
 
 export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
-  console.log("[CRYPTO] Decrypt called.");
+  console.log("🔥 NUCLEAR FIX: decryptEditBin CALLED 🔥");
   return buffer.slice(0);
 }
 
