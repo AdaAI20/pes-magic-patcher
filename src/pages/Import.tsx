@@ -1,333 +1,256 @@
-import { useRef, useCallback, useEffect } from "react";
+import { useRef, useState } from "react";
 import {
   Upload,
   FileArchive,
   FileText,
   Database,
   FolderOpen,
-  CheckCircle,
-  AlertCircle,
   X,
   HardDrive,
+  CheckCircle,
+  AlertCircle,
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useFileStore, formatFileSize } from "@/stores/fileStore";
-import { useState } from "react";
+import { useFileStore, FileType } from "@/store/fileStore";
 
-interface FileType {
-  extension: string;
+/* -------------------------------- TYPES -------------------------------- */
+
+interface ImportedFileUI {
+  id: string;
+  file: File;
   name: string;
-  description: string;
-  icon: React.ElementType;
-  color: string;
+  size: string;
+  type: FileType;
+  status: "pending" | "importing" | "success" | "error";
+  errorMessage?: string;
 }
 
-const supportedFiles: FileType[] = [
-  { extension: ".cpk", name: "CPK Archive", description: "Criware packed files (game data)", icon: FileArchive, color: "text-primary" },
-  { extension: ".bin", name: "Option File", description: "PES option file / save data", icon: Database, color: "text-accent" },
-  { extension: ".ted", name: "Team Data", description: "Team edit data file", icon: FileText, color: "text-success" },
-  { extension: "EDIT*", name: "EDIT File", description: "EDIT00000000 save file", icon: HardDrive, color: "text-warning" },
-];
+/* ----------------------------- HELPERS ---------------------------------- */
+
+const formatSize = (bytes: number) =>
+  bytes > 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${(bytes / 1024).toFixed(1)} KB`;
+
+// 🔥 FIX: Robust type detection handles no-extension files like EDIT00000000
+const detectType = (file: File): FileType => {
+  const name = file.name.toUpperCase();
+
+  // Exact match for the main save file
+  if (name === "EDIT00000000" || name === "EDIT00000000.BIN") return "BIN";
+  
+  // Extension checks
+  if (name.endsWith(".BIN")) return "BIN";
+  if (name.endsWith(".CPK")) return "CPK";
+  if (name.endsWith(".TED")) return "TED";
+  if (name.endsWith(".DAT")) return "DAT";
+
+  return "UNKNOWN";
+};
+
+const iconByType: Record<string, React.ElementType> = {
+  BIN: Database,
+  CPK: FileArchive,
+  TED: FileText,
+  DAT: HardDrive,
+  UNKNOWN: FileArchive,
+};
+
+/* ------------------------------- COMPONENT -------------------------------- */
 
 export default function Import() {
-  const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  const { 
-    importQueue, 
-    importFile, 
-    removeFromQueue, 
-    initializeCrypto,
-    cryptoReady,
-    editBinData,
-  } = useFileStore();
+  const [dragActive, setDragActive] = useState(false);
+  const [uiFiles, setUiFiles] = useState<ImportedFileUI[]>([]);
 
-  // Initialize crypto on mount
-  useEffect(() => {
-    initializeCrypto().catch(console.error);
-  }, [initializeCrypto]);
+  // Connect to the global store
+  const importFileToStore = useFileStore((state) => state.importFile);
 
-  const handleDrag = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  }, []);
+  /* ----------------------------- ACTIONS -------------------------------- */
 
-  const processFiles = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    
-    for (const file of Array.from(files)) {
-      await importFile(file);
-    }
-  }, [importFile]);
+  const processFile = async (uiFile: ImportedFileUI) => {
+    // Update UI to loading
+    setUiFiles((prev) =>
+      prev.map((f) => (f.id === uiFile.id ? { ...f, status: "importing" } : f))
+    );
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    processFiles(e.dataTransfer.files);
-  }, [processFiles]);
+    try {
+      if (uiFile.type === "UNKNOWN") {
+        throw new Error("Unsupported file format");
+      }
 
-  const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    processFiles(e.target.files);
-    // Reset input so same file can be selected again
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  }, [processFiles]);
+      console.log(`[IMPORT] Processing ${uiFile.name} as ${uiFile.type}`);
+      
+      // Call the store action
+      await importFileToStore(uiFile.file, uiFile.type);
 
-  const handleBrowseClick = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'success':
-        return <CheckCircle className="w-5 h-5" />;
-      case 'error':
-        return <AlertCircle className="w-5 h-5" />;
-      case 'loading':
-        return <Loader2 className="w-5 h-5 animate-spin" />;
-      default:
-        return <FileArchive className="w-5 h-5" />;
+      // Update UI to success
+      setUiFiles((prev) =>
+        prev.map((f) => (f.id === uiFile.id ? { ...f, status: "success" } : f))
+      );
+    } catch (error: any) {
+      console.error("[IMPORT] Failed:", error);
+      setUiFiles((prev) =>
+        prev.map((f) =>
+          f.id === uiFile.id
+            ? { ...f, status: "error", errorMessage: error.message }
+            : f
+        )
+      );
     }
   };
 
-  const getStatusClass = (status: string) => {
-    switch (status) {
-      case 'success':
-        return "bg-success/15 text-success";
-      case 'error':
-        return "bg-destructive/15 text-destructive";
-      case 'loading':
-        return "bg-primary/15 text-primary";
-      default:
-        return "bg-secondary text-muted-foreground";
-    }
+  const handleFilesAdded = (fileList: FileList | null) => {
+    if (!fileList) return;
+
+    const newFiles: ImportedFileUI[] = Array.from(fileList).map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      name: file.name,
+      size: formatSize(file.size),
+      type: detectType(file),
+      status: "pending",
+    }));
+
+    setUiFiles((prev) => [...prev, ...newFiles]);
+
+    // Automatically start processing valid files
+    newFiles.forEach((file) => {
+      processFile(file);
+    });
   };
+
+  const removeFile = (id: string) => {
+    setUiFiles((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  /* ------------------------------- UI -------------------------------- */
 
   return (
     <div className="space-y-6">
-      {/* Hidden file input */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        className="hidden"
-        multiple
-        accept=".cpk,.bin,.ted,.dat"
-        onChange={handleFileInput}
-      />
-      
-      {/* Header */}
       <div>
-        <h1 className="text-3xl font-display font-bold text-foreground">
-          Import <span className="text-gradient-primary">Data</span>
+        <h1 className="text-3xl font-display font-bold">
+          Import <span className="text-gradient-primary">Files</span>
         </h1>
         <p className="text-muted-foreground">
-          Load game files, option files, and patch data
-          {!cryptoReady && (
-            <span className="ml-2 text-warning">(Initializing...)</span>
-          )}
+          Supports EDIT00000000, CPK archives, and team data
         </p>
       </div>
 
-      {/* Status banner when EDIT is loaded */}
-      {editBinData && (
-        <div className="card-gaming p-4 bg-success/10 border-success/30">
-          <div className="flex items-center gap-3">
-            <CheckCircle className="w-5 h-5 text-success" />
-            <div className="flex-1">
-              <p className="font-medium text-foreground">
-                {editBinData.fileName} loaded successfully
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {editBinData.players.length} players • {editBinData.teams.length} teams • {formatFileSize(editBinData.fileSize)}
-              </p>
-            </div>
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => window.location.href = '/#/players'}
-            >
-              View Players
-            </Button>
-          </div>
-        </div>
-      )}
+      {/* Drop zone */}
+      <div
+        onClick={() => fileInputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragActive(false);
+          handleFilesAdded(e.dataTransfer.files);
+        }}
+        className={cn(
+          "card-gaming border-2 border-dashed p-12 text-center cursor-pointer transition-all",
+          dragActive
+            ? "border-primary bg-primary/10"
+            : "border-border hover:border-primary/40"
+        )}
+      >
+        <Upload className="w-10 h-10 mx-auto mb-4 text-primary" />
+        <h3 className="text-xl font-semibold mb-2">
+          Drop files here or click to browse
+        </h3>
+        <p className="text-muted-foreground mb-4">
+          EDIT00000000 • .bin • .cpk • .ted • .dat
+        </p>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Drop Zone */}
-        <div className="lg:col-span-2 space-y-6">
-          <div
-            className={cn(
-              "card-gaming border-2 border-dashed p-12 text-center transition-all duration-300 cursor-pointer",
-              dragActive
-                ? "border-primary bg-primary/5"
-                : "border-border hover:border-primary/50"
-            )}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-            onClick={handleBrowseClick}
-          >
-            <div
-              className={cn(
-                "w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center transition-colors",
-                dragActive ? "bg-primary/20" : "bg-secondary"
-              )}
-            >
-              <Upload
-                className={cn(
-                  "w-8 h-8 transition-colors",
-                  dragActive ? "text-primary" : "text-muted-foreground"
-                )}
-              />
-            </div>
-            <h3 className="font-display font-semibold text-xl text-foreground mb-2">
-              Drop files here to import
-            </h3>
-            <p className="text-muted-foreground mb-6">
-              or click to browse your files
-            </p>
-            <Button variant="gaming" size="lg" onClick={(e) => { e.stopPropagation(); handleBrowseClick(); }}>
-              <FolderOpen className="w-5 h-5 mr-2" />
-              Browse Files
-            </Button>
-          </div>
+        <Button variant="gaming" size="lg">
+          <FolderOpen className="w-5 h-5 mr-2" />
+          Browse Files
+        </Button>
 
-          {/* Import Queue */}
-          {importQueue.length > 0 && (
-            <div className="space-y-4">
-              <h2 className="section-title">Import Queue</h2>
-              <div className="space-y-3">
-                {importQueue.map((file) => (
-                  <div
-                    key={file.id}
-                    className="card-gaming p-4 flex items-center gap-4"
-                  >
-                    <div className={cn("p-2.5 rounded-lg", getStatusClass(file.status))}>
-                      {getStatusIcon(file.status)}
-                    </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => handleFilesAdded(e.target.files)}
+        />
+      </div>
 
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <p className="font-medium text-foreground truncate">
-                          {file.name}
-                        </p>
-                        <span className="text-xs text-muted-foreground ml-2">
-                          {formatFileSize(file.size)}
-                        </span>
-                      </div>
-
-                      {file.status === "loading" && file.progress !== undefined ? (
-                        <div className="w-full bg-secondary rounded-full h-1.5">
-                          <div
-                            className="bg-primary h-1.5 rounded-full transition-all duration-300"
-                            style={{ width: `${file.progress}%` }}
-                          />
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">
-                          {file.status === "success" && "Import complete"}
-                          {file.status === "error" && (file.error || "Import failed")}
-                          {file.status === "idle" && "Waiting..."}
-                        </p>
-                      )}
-                    </div>
-
-                    <span className="px-2 py-1 rounded text-xs font-medium bg-secondary text-muted-foreground uppercase">
-                      {file.type}
-                    </span>
-
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeFromQueue(file.id)}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Supported Formats */}
+      {/* Import Queue */}
+      {uiFiles.length > 0 && (
         <div className="space-y-4">
-          <h2 className="section-title">Supported Formats</h2>
-          <div className="space-y-3">
-            {supportedFiles.map((file) => {
-              const Icon = file.icon;
-              return (
-                <div
-                  key={file.extension}
-                  className="card-gaming p-4 flex items-start gap-3 hover:border-primary/30 transition-colors cursor-pointer"
-                >
-                  <div className={cn("p-2 rounded-lg bg-secondary", file.color)}>
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium text-foreground">
-                        {file.name}
+          <h2 className="section-title">Import Queue</h2>
+
+          {uiFiles.map((file) => {
+            const Icon = iconByType[file.type] || FileArchive;
+
+            return (
+              <div
+                key={file.id}
+                className={cn(
+                  "card-gaming p-4 flex items-center gap-4 transition-colors",
+                  file.status === "error" ? "border-destructive/50" : ""
+                )}
+              >
+                <div className="p-2 rounded-lg bg-secondary">
+                  <Icon className="w-5 h-5" />
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate">{file.name}</p>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>{file.size}</span>
+                    {file.errorMessage && (
+                      <span className="text-destructive">
+                        • {file.errorMessage}
                       </span>
-                      <span className="text-xs text-muted-foreground font-mono">
-                        {file.extension}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {file.description}
-                    </p>
+                    )}
                   </div>
                 </div>
-              );
-            })}
-          </div>
 
-          {/* Quick Actions */}
-          <div className="card-gaming p-4 mt-6">
-            <h3 className="font-display font-semibold text-foreground mb-3">
-              Quick Import
-            </h3>
-            <div className="space-y-2">
-              <Button 
-                variant="outline" 
-                className="w-full justify-start gap-2"
-                onClick={handleBrowseClick}
-              >
-                <HardDrive className="w-4 h-4" />
-                Load EDIT00000000
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full justify-start gap-2"
-                onClick={handleBrowseClick}
-              >
-                <Database className="w-4 h-4" />
-                Import Option File
-              </Button>
-              <Button 
-                variant="outline" 
-                className="w-full justify-start gap-2"
-                onClick={handleBrowseClick}
-                disabled
-              >
-                <FileArchive className="w-4 h-4" />
-                Extract CPK Archive (Coming Soon)
-              </Button>
-            </div>
-          </div>
+                {/* Status Indicator */}
+                <div className="flex items-center gap-3">
+                  {file.status === "importing" && (
+                    <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                  )}
+                  {file.status === "success" && (
+                    <CheckCircle className="w-5 h-5 text-success" />
+                  )}
+                  {file.status === "error" && (
+                    <AlertCircle className="w-5 h-5 text-destructive" />
+                  )}
+                  
+                  <span
+                    className={cn(
+                      "text-xs font-mono px-2 py-1 rounded bg-secondary",
+                      file.status === "success" && "text-success bg-success/10",
+                      file.status === "error" && "text-destructive bg-destructive/10"
+                    )}
+                  >
+                    {file.type}
+                  </span>
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeFile(file.id);
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            );
+          })}
         </div>
-      </div>
+      )}
     </div>
   );
 }
