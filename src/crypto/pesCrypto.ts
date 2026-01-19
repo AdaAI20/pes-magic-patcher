@@ -6,6 +6,7 @@ let cryptoReady = false;
 // Helper to handle GitHub Pages paths
 function resolveWasmPath() {
   const base = import.meta.env.BASE_URL || "/";
+  // Ensure we don't have double slashes
   const cleanBase = base.endsWith("/") ? base.slice(0, -1) : base;
   return `${cleanBase}/pes_crypto.wasm`;
 }
@@ -47,9 +48,11 @@ export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
   // Currently, your WASM is a "Skeleton" (Empty).
   // Calling it won't decrypt anything yet.
   // We return the buffer as-is so the UI shows the "Encrypted/Garbage" data safely.
+  // In the next step, we will call the actual Rust function here.
   return buffer.slice(0);
 }
 
 export function encryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
+  // Pass-through for now
   return buffer.slice(0);
 }
