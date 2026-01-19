@@ -1,126 +1,241 @@
 import { useRef, useState } from "react";
 import {
-  Upload, FileArchive, FileText, Database, FolderOpen, X, HardDrive, CheckCircle, AlertCircle, Loader2,
+  Upload,
+  FileArchive,
+  FileText,
+  Database,
+  FolderOpen,
+  X,
+  HardDrive,
 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useFileStore, FileType } from "@/store/fileStore";
 
-interface ImportedFileUI {
-  id: string;
+import { initCrypto } from "@/crypto/pesCrypto";
+import { loadEditBin } from "@/parsers/editBinParser";
+import { useEditBinStore } from "@/store/editBinStore";
+
+/* -------------------------------- TYPES -------------------------------- */
+
+type FileStatus = "pending" | "loaded" | "error";
+
+interface ImportedFile {
   file: File;
   name: string;
   size: string;
-  type: FileType;
-  status: "pending" | "importing" | "success" | "error";
-  errorMessage?: string;
+  type: "BIN" | "CPK" | "TED" | "DAT" | "UNKNOWN";
+  status: FileStatus;
 }
+
+/* ----------------------------- HELPERS ---------------------------------- */
 
 const formatSize = (bytes: number) =>
   bytes > 1024 * 1024
     ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
     : `${(bytes / 1024).toFixed(1)} KB`;
 
-// 🔥 FIX: Explicitly handle EDIT00000000 with or without extension
-const detectType = (file: File): FileType => {
-  const name = file.name.toUpperCase();
+const detectType = (file: File): ImportedFile["type"] => {
+  const name = file.name.toLowerCase();
 
-  if (name === "EDIT00000000" || name === "EDIT00000000.BIN") return "BIN";
-  if (name.endsWith(".BIN")) return "BIN";
-  if (name.endsWith(".CPK")) return "CPK";
-  if (name.endsWith(".TED")) return "TED";
-  if (name.endsWith(".DAT")) return "DAT";
+  // Check for EDIT00000000 (no extension or .bin)
+  if (name.startsWith("edit00000000")) return "BIN";
+  
+  if (name.endsWith(".bin")) return "BIN";
+  if (name.endsWith(".cpk")) return "CPK";
+  if (name.endsWith(".ted")) return "TED";
+  if (name.endsWith(".dat")) return "DAT";
 
   return "UNKNOWN";
 };
 
-const iconByType: Record<string, React.ElementType> = {
-  BIN: Database, CPK: FileArchive, TED: FileText, DAT: HardDrive, UNKNOWN: FileArchive,
+const iconByType = {
+  BIN: Database,
+  CPK: FileArchive,
+  TED: FileText,
+  DAT: HardDrive,
+  UNKNOWN: FileArchive,
 };
+
+/* ------------------------------- COMPONENT -------------------------------- */
 
 export default function Import() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [uiFiles, setUiFiles] = useState<ImportedFileUI[]>([]);
-  const importFileToStore = useFileStore((state) => state.importFile);
+  const [files, setFiles] = useState<ImportedFile[]>([]);
 
-  const processFile = async (uiFile: ImportedFileUI) => {
-    // 1. Set Status to Loading
-    setUiFiles((prev) => prev.map((f) => (f.id === uiFile.id ? { ...f, status: "importing" } : f)));
+  // Correct store action
+  const loadEditBinToStore = useEditBinStore((s) => s.loadEditBin);
+
+  /* ----------------------------- CORE LOGIC ----------------------------- */
+
+  const handleEditBin = async (file: File, index: number) => {
+    console.log("[IMPORT] Handling EDIT00000000");
 
     try {
-      if (uiFile.type === "UNKNOWN") throw new Error("Unsupported file format");
+      // 🔥 SAFETY FIX: Race crypto init against a 2-second timeout
+      // This prevents the "hanging forever" bug if WASM fails to load
+      const cryptoPromise = initCrypto();
+      const timeoutPromise = new Promise((resolve) => 
+        setTimeout(() => {
+          console.warn("[IMPORT] Crypto init timed out - forcing continue");
+          resolve(true);
+        }, 2000)
+      );
 
-      console.log(`[IMPORT] Processing ${uiFile.name} as ${uiFile.type}`);
-      
-      // 2. Send to Store (This calls initCrypto)
-      await importFileToStore(uiFile.file, uiFile.type);
+      await Promise.race([cryptoPromise, timeoutPromise]);
 
-      // 3. Set Status to Success
-      setUiFiles((prev) => prev.map((f) => (f.id === uiFile.id ? { ...f, status: "success" } : f)));
-    } catch (error: any) {
-      console.error("[IMPORT] Failed:", error);
-      setUiFiles((prev) => prev.map((f) => f.id === uiFile.id ? { ...f, status: "error", errorMessage: error.message } : f));
+      console.log("[IMPORT] Reading file...");
+      const result = await loadEditBin(file);
+
+      console.log("[IMPORT] Parsed header:", result.header);
+
+      // Update global store
+      loadEditBinToStore({
+        header: result.header,
+        raw: result.raw,
+      });
+
+      console.log("[IMPORT] Stored EDIT00000000 in Zustand");
+
+      updateStatus(index, "loaded");
+    } catch (err) {
+      console.error("[IMPORT] FAILED:", err);
+      updateStatus(index, "error");
     }
   };
 
-  const handleFilesAdded = (fileList: FileList | null) => {
+  const updateStatus = (index: number, status: FileStatus) => {
+    setFiles((prev) =>
+      prev.map((f, i) => (i === index ? { ...f, status } : f))
+    );
+  };
+
+  const addFiles = (fileList: FileList | null) => {
     if (!fileList) return;
-    const newFiles = Array.from(fileList).map((file) => ({
-      id: crypto.randomUUID(),
+
+    const incoming: ImportedFile[] = Array.from(fileList).map((file) => ({
       file,
       name: file.name,
       size: formatSize(file.size),
       type: detectType(file),
-      status: "pending" as const,
+      status: "pending",
     }));
 
-    setUiFiles((prev) => [...prev, ...newFiles]);
-    newFiles.forEach(processFile);
+    const baseIndex = files.length;
+    setFiles((prev) => [...prev, ...incoming]);
+
+    incoming.forEach((item, i) => {
+      const index = baseIndex + i;
+      
+      // Handle EDIT00000000 specifically
+      if (item.type === "BIN" && item.file.name.toUpperCase().startsWith("EDIT00000000")) {
+        handleEditBin(item.file, index);
+      }
+    });
   };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  /* ------------------------------- UI -------------------------------- */
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-display font-bold">Import <span className="text-gradient-primary">Files</span></h1>
-        <p className="text-muted-foreground">Supports EDIT00000000, CPK archives, and team data</p>
+        <h1 className="text-3xl font-display font-bold">
+          Import <span className="text-gradient-primary">Files</span>
+        </h1>
+        <p className="text-muted-foreground">
+          Supports EDIT00000000, CPK archives, and team data
+        </p>
       </div>
 
+      {/* Drop Zone */}
       <div
         onClick={() => fileInputRef.current?.click()}
-        onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
         onDragLeave={() => setDragActive(false)}
-        onDrop={(e) => { e.preventDefault(); setDragActive(false); handleFilesAdded(e.dataTransfer.files); }}
-        className={cn("card-gaming border-2 border-dashed p-12 text-center cursor-pointer transition-all", dragActive ? "border-primary bg-primary/10" : "border-border hover:border-primary/40")}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragActive(false);
+          addFiles(e.dataTransfer.files);
+        }}
+        className={cn(
+          "card-gaming border-2 border-dashed p-12 text-center cursor-pointer transition-all",
+          dragActive
+            ? "border-primary bg-primary/10"
+            : "border-border hover:border-primary/40"
+        )}
       >
         <Upload className="w-10 h-10 mx-auto mb-4 text-primary" />
-        <h3 className="text-xl font-semibold mb-2">Drop files here or click to browse</h3>
-        <p className="text-muted-foreground mb-4">EDIT00000000 • .bin • .cpk • .ted</p>
-        <Button variant="gaming">Browse Files</Button>
-        <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleFilesAdded(e.target.files)} />
+        <h3 className="text-xl font-semibold mb-2">
+          Drop files here or click to browse
+        </h3>
+        <p className="text-muted-foreground mb-4">
+          EDIT00000000 • .bin • .cpk • .ted • .dat
+        </p>
+
+        <Button variant="gaming" size="lg">
+          <FolderOpen className="w-5 h-5 mr-2" />
+          Browse Files
+        </Button>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => addFiles(e.target.files)}
+        />
       </div>
 
-      {uiFiles.length > 0 && (
+      {/* Import Queue */}
+      {files.length > 0 && (
         <div className="space-y-4">
           <h2 className="section-title">Import Queue</h2>
-          {uiFiles.map((file) => {
-            const Icon = iconByType[file.type] || FileArchive;
+
+          {files.map((file, index) => {
+            const Icon = iconByType[file.type];
+
             return (
-              <div key={file.id} className={cn("card-gaming p-4 flex items-center gap-4", file.status === "error" ? "border-destructive/50" : "")}>
-                <div className="p-2 rounded-lg bg-secondary"><Icon className="w-5 h-5" /></div>
+              <div
+                key={index}
+                className="card-gaming p-4 flex items-center gap-4"
+              >
+                <div className="p-2 rounded-lg bg-secondary">
+                  <Icon className="w-5 h-5" />
+                </div>
+
                 <div className="flex-1 min-w-0">
                   <p className="font-medium truncate">{file.name}</p>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{file.size}</span>
-                    {file.errorMessage && <span className="text-destructive">• {file.errorMessage}</span>}
-                  </div>
+                  <p className="text-xs text-muted-foreground">{file.size}</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  {file.status === "importing" && <Loader2 className="w-5 h-5 animate-spin text-primary" />}
-                  {file.status === "success" && <CheckCircle className="w-5 h-5 text-success" />}
-                  {file.status === "error" && <AlertCircle className="w-5 h-5 text-destructive" />}
-                  <span className="text-xs font-mono px-2 py-1 rounded bg-secondary">{file.type}</span>
-                </div>
+
+                <span
+                  className={cn(
+                    "text-xs font-mono px-2 py-1 rounded",
+                    file.status === "loaded" &&
+                      "bg-success/20 text-success",
+                    file.status === "error" &&
+                      "bg-destructive/20 text-destructive",
+                    file.status === "pending" && "bg-secondary"
+                  )}
+                >
+                  {file.status.toUpperCase()}
+                </span>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeFile(index)}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
               </div>
             );
           })}
