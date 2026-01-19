@@ -14,13 +14,9 @@ export interface EditData {
 }
 
 interface FileStoreState {
-  // General State
   isCryptoReady: boolean;
-  
-  // EditBin State
   editBin: EditData | null;
   
-  // Actions
   initialize: () => Promise<void>;
   importFile: (file: File, type: FileType) => Promise<void>;
   clearEditBin: () => void;
@@ -34,18 +30,23 @@ export const useFileStore = create<FileStoreState>((set, get) => ({
 
   initialize: async () => {
     if (get().isCryptoReady) return;
+    
+    console.log("[FileStore] Initializing Crypto...");
     try {
-      console.log("[FileStore] Initializing Crypto...");
+      // We explicitly await here. If pesCrypto hangs, this line hangs.
+      // The fix in pesCrypto.ts ensures this resolves immediately.
       await initCrypto();
       set({ isCryptoReady: true });
       console.log("[FileStore] Crypto initialized");
     } catch (e) {
       console.error("[FileStore] Crypto failed to initialize", e);
+      // RE-THROW the error so importFile knows to stop the spinner
+      throw e; 
     }
   },
 
   importFile: async (file: File, type: FileType) => {
-    // Ensure crypto is ready before processing any binary files
+    // 1. Initialize first. If this fails, the error bubbles up to the UI
     await get().initialize();
 
     switch (type) {
@@ -62,16 +63,12 @@ export const useFileStore = create<FileStoreState>((set, get) => ({
         break;
 
       case "CPK":
-        // Placeholder for future CPK logic
-        console.warn("[FileStore] CPK detected but parser not implemented");
         throw new Error("CPK parsing not yet implemented");
 
       case "TED":
-        console.warn("[FileStore] TED detected but parser not implemented");
         throw new Error("TED parsing not yet implemented");
 
       case "DAT":
-        console.warn("[FileStore] DAT detected but parser not implemented");
         throw new Error("DAT parsing not yet implemented");
 
       case "UNKNOWN":
