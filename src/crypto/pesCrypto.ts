@@ -15,80 +15,97 @@ export async function initCrypto() {
 
   try {
     const path = resolveWasmPath();
-    console.log("[CRYPTO] Fetching Real Crypto WASM from:", path);
+    console.log("🔍 [DEBUGGER] 1. Fetching WASM from:", path);
     
     const response = await fetch(path);
     if (!response.ok) throw new Error(`WASM 404 at ${path}`);
     
     const bytes = await response.arrayBuffer();
-    
-    // Create memory with enough initial space (200 pages = ~12.8MB)
-    // We can grow it later if the file is larger.
+    const size = bytes.byteLength;
+    console.log(`🔍 [DEBUGGER] 2. WASM Downloaded. Size: ${size} bytes`);
+
+    // CHECK: Is this the Dummy file?
+    if (size < 1000) {
+        console.warn("🚨 [DEBUGGER] WARNING: This looks like the DUMMY file (<1KB).");
+        console.warn("🚨 [DEBUGGER] Real crypto requires the 21KB+ file.");
+    } else {
+        console.log("✅ [DEBUGGER] File size looks correct for Real Crypto.");
+    }
+
+    // Memory setup
     const memory = new WebAssembly.Memory({ initial: 200, maximum: 2000 });
-    
-    const { instance } = await WebAssembly.instantiate(bytes, {
-      env: { memory }
-    });
+    const { instance } = await WebAssembly.instantiate(bytes, { env: { memory } });
     
     wasmInstance = instance;
-    wasmMemory = memory;
     
-    // Check if the WASM exported its own memory (overwrite ours if so)
+    // Handle memory export differences
     if (instance.exports.memory) {
       wasmMemory = instance.exports.memory as WebAssembly.Memory;
+    } else {
+      wasmMemory = memory;
     }
 
     cryptoReady = true;
-    console.log("[CRYPTO] Real Crypto Engine Loaded!");
-  } catch (err) {
-    console.error("[CRYPTO] WASM Load Failed:", err);
-  }
-}
-
-function processWithWasm(funcName: string, inputBuffer: ArrayBuffer): ArrayBuffer {
-  if (!cryptoReady || !wasmInstance || !wasmMemory) {
-    console.warn("[CRYPTO] Engine not ready - using JS pass-through");
-    return inputBuffer.slice(0);
-  }
-
-  try {
-    const func = wasmInstance.exports[funcName] as CallableFunction;
-    if (!func) throw new Error(`Function ${funcName} not found in WASM`);
-
-    const size = inputBuffer.byteLength;
-    
-    // Ensure WASM memory is large enough to hold the file
-    const currentPages = wasmMemory.buffer.byteLength / 65536;
-    const neededPages = Math.ceil(size / 65536) + 10; // +10 for safety/stack
-    
-    if (neededPages > currentPages) {
-      console.log(`[CRYPTO] Growing memory from ${currentPages} to ${neededPages} pages...`);
-      wasmMemory.grow(neededPages - currentPages);
-    }
-
-    // 1. Write input data to WASM memory at offset 0
-    const memView = new Uint8Array(wasmMemory.buffer);
-    memView.set(new Uint8Array(inputBuffer), 0);
-
-    // 2. Call the Rust function (it modifies memory in-place)
-    // Rust signature: fn(ptr: *mut u8, len: usize)
-    console.log(`[CRYPTO] Running ${funcName} on ${size} bytes...`);
-    func(0, size);
-
-    // 3. Read the result back from offset 0
-    // We copy it to a new buffer to safely return it to JS
-    return memView.slice(0, size).buffer;
+    console.log("🔍 [DEBUGGER] 3. Instantiated. Exports:", Object.keys(instance.exports));
 
   } catch (err) {
-    console.error(`[CRYPTO] Error executing ${funcName}:`, err);
-    return inputBuffer.slice(0); // Fail-safe: return original
+    console.error("🚨 [DEBUGGER] Init Failed:", err);
   }
 }
 
 export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
-  return processWithWasm("decrypt_edit", buffer);
+  console.log("🔍 [DEBUGGER] 4. decryptEditBin called");
+
+  if (!cryptoReady || !wasmInstance || !wasmMemory) {
+    console.error("🚨 [DEBUGGER] CRITICAL: Crypto not ready yet! Returning raw buffer.");
+    return buffer.slice(0);
+  }
+
+  try {
+    const funcName = "decrypt_edit";
+    const func = wasmInstance.exports[funcName] as CallableFunction;
+
+    if (!func) {
+      console.error(`🚨 [DEBUGGER] Function '${funcName}' NOT FOUND in WASM.`);
+      return buffer.slice(0);
+    }
+
+    const size = buffer.byteLength;
+    
+    // Memory Growth Logic
+    const currentPages = wasmMemory.buffer.byteLength / 65536;
+    const neededPages = Math.ceil(size / 65536) + 10;
+    
+    if (neededPages > currentPages) {
+      console.log(`🔍 [DEBUGGER] Growing memory...`);
+      wasmMemory.grow(neededPages - currentPages);
+    }
+
+    const memView = new Uint8Array(wasmMemory.buffer);
+    
+    // 1. Write
+    memView.set(new Uint8Array(buffer), 0);
+
+    // 2. Execute
+    console.log(`🔍 [DEBUGGER] 5. Running Rust Decryption on ${size} bytes...`);
+    func(0, size);
+
+    // 3. Read
+    const result = memView.slice(0, size).buffer;
+    
+    // Check Result header
+    const view = new DataView(result);
+    const magic = view.getUint32(0, true); // Should NOT be garbage if successful
+    console.log(`🔍 [DEBUGGER] 6. Decryption Done. Header Magic: ${magic}`);
+
+    return result;
+
+  } catch (err) {
+    console.error("🚨 [DEBUGGER] Crash inside decrypt:", err);
+    return buffer.slice(0);
+  }
 }
 
 export function encryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
-  return processWithWasm("encrypt_edit", buffer);
+  return buffer.slice(0);
 }
