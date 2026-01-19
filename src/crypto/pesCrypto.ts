@@ -19,19 +19,31 @@ export async function initCrypto() {
 
   try {
     const path = resolveWasmPath();
-    console.log("🔍 [AUTO-RETRY] Fetching WASM:", path);
+    console.log("🔍 [AUTO-RETRY] Fetching WASM from:", path);
     
     const response = await fetch(path);
-    if (!response.ok) throw new Error(`WASM 404`);
+    if (!response.ok) throw new Error(`WASM 404 at ${path}`);
+    
     const bytes = await response.arrayBuffer();
 
+    // Create memory (200 pages = 12.8MB)
     const memory = new WebAssembly.Memory({ initial: 200, maximum: 2000 });
     const { instance } = await WebAssembly.instantiate(bytes, { env: { memory } });
     
     wasmInstance = instance;
-    wasmMemory = instance.exports.memory ? (instance.exports.memory as WebAssembly.Memory) : memory;
+    
+    // Handle memory export
+    if (instance.exports.memory) {
+      wasmMemory = instance.exports.memory as WebAssembly.Memory;
+    } else {
+      wasmMemory = memory;
+    }
+
     cryptoReady = true;
-    console.log("✅ [AUTO-RETRY] WASM Loaded.");
+    
+    // Debug: List available exports to confirm we see decrypt_v1 / decrypt_v2
+    console.log("✅ [AUTO-RETRY] WASM Loaded. Exports:", Object.keys(instance.exports));
+
   } catch (err) {
     console.error("🚨 [AUTO-RETRY] Init Failed:", err);
   }
@@ -39,50 +51,63 @@ export async function initCrypto() {
 
 export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
   if (!cryptoReady || !wasmInstance || !wasmMemory) {
-    console.warn("Crypto not ready");
+    console.warn("[CRYPTO] Not ready - passing through");
     return buffer.slice(0);
   }
 
-  // Define the strategies available in our Rust WASM
-  const strategies = ["decrypt_v1", "decrypt_v2"];
+  // 1. Identify available strategies from WASM exports
+  const exports = wasmInstance.exports;
+  const strategies: string[] = [];
+  
+  if (exports.decrypt_v1) strategies.push("decrypt_v1");
+  if (exports.decrypt_v2) strategies.push("decrypt_v2");
+  if (exports.decrypt_edit) strategies.push("decrypt_edit"); // Fallback for old WASM
 
+  if (strategies.length === 0) {
+    console.error("🚨 [AUTO-RETRY] No decrypt function found in WASM!");
+    return buffer.slice(0);
+  }
+
+  // 2. Try each strategy
   for (const strategy of strategies) {
-    console.log(`🔄 [AUTO-RETRY] Attempting Method: ${strategy}...`);
+    console.log(`🔄 [AUTO-RETRY] Attempting Strategy: ${strategy}...`);
 
     try {
-        // 1. Create a FRESH copy of the input buffer (so we can retry if fail)
-        const workingBuffer = buffer.slice(0);
-        const size = workingBuffer.byteLength;
-
-        // 2. Prepare Memory
-        const heapBase = (wasmInstance.exports.__heap_base as WebAssembly.Global)?.value || 1048576;
-        const filePointer = heapBase + 5242880; // 5MB gap
-
-        if (wasmMemory.buffer.byteLength < filePointer + size) {
-            wasmMemory.grow(Math.ceil((filePointer + size - wasmMemory.buffer.byteLength) / 65536) + 5);
+        const func = exports[strategy] as CallableFunction;
+        
+        // Prepare Memory
+        const size = buffer.byteLength;
+        const heapBase = (exports.__heap_base as WebAssembly.Global)?.value || 1048576;
+        const filePointer = heapBase + 5242880; // 5MB safety gap
+        
+        // Grow if needed
+        const requiredEnd = filePointer + size;
+        if (wasmMemory.buffer.byteLength < requiredEnd) {
+             const missing = requiredEnd - wasmMemory.buffer.byteLength;
+             const pages = Math.ceil(missing / 65536) + 10;
+             wasmMemory.grow(pages);
         }
 
-        // 3. Write Data
-        new Uint8Array(wasmMemory.buffer).set(new Uint8Array(workingBuffer), filePointer);
+        // Write Data
+        new Uint8Array(wasmMemory.buffer).set(new Uint8Array(buffer), filePointer);
 
-        // 4. Execute Rust Function
-        const func = wasmInstance.exports[strategy] as CallableFunction;
-        if (!func) continue;
+        // Execute
         func(filePointer, size);
 
-        // 5. Read Result
+        // Read Result
+        // Important: Get fresh buffer view after execution
         const resultBuffer = wasmMemory.buffer.slice(filePointer, filePointer + size);
         
-        // 6. CHECK MAGIC NUMBER
+        // Validate Magic Number
         const view = new DataView(resultBuffer);
         const magic = view.getUint32(0, true);
 
         if (magic === EXPECTED_MAGIC) {
-            console.log(`✅ [AUTO-RETRY] SUCCESS! Method ${strategy} worked. Magic: ${magic}`);
-            return resultBuffer; // Return successful decrypt
+            console.log(`✅ [AUTO-RETRY] SUCCESS! ${strategy} worked. Magic: ${magic}`);
+            return resultBuffer; // We found the correct key!
         } else {
-            console.warn(`❌ [AUTO-RETRY] Method ${strategy} failed. Got Magic: ${magic} (Expected ${EXPECTED_MAGIC})`);
-            // Loop continues to next strategy...
+            console.warn(`❌ [AUTO-RETRY] ${strategy} produced invalid magic: ${magic} (Expected ${EXPECTED_MAGIC})`);
+            // Continue loop to try next key...
         }
 
     } catch (e) {
@@ -90,7 +115,7 @@ export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
     }
   }
 
-  console.error("🚨 [AUTO-RETRY] ALL METHODS FAILED. Returning raw buffer.");
+  console.error("🚨 [AUTO-RETRY] All strategies failed. Returning original buffer.");
   return buffer.slice(0);
 }
 
