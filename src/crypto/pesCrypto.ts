@@ -57,26 +57,26 @@ export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
     
     // 1. Calculate Safe Pointer
     // Rust allocator starts at __heap_base. 
-    // We leave 5MB gap after heap_base for Rust to use for its own internal vectors,
-    // and put our file data AFTER that.
-    const HEAP_START = heapBase ? heapBase.value : 1048576; // Default to 1MB if missing
-    const RUST_RESERVE = 5 * 1024 * 1024; // 5MB buffer for Rust's internal ops
+    // We leave a 5MB safety gap AFTER heap_base for Rust variables/stack.
+    // We write the file AFTER that gap.
+    const HEAP_START = heapBase ? heapBase.value : 1048576; // Default to 1MB if symbol missing
+    const RUST_RESERVE = 5 * 1024 * 1024; // 5MB buffer for Rust's internal use
     const filePointer = HEAP_START + RUST_RESERVE;
     const fileSize = buffer.byteLength;
 
     // 2. Ensure Memory Size
-    // We need: Pointer location + File Size
+    // We need space for: Pointer location + File Size
     const requiredBytes = filePointer + fileSize;
     const currentBytes = wasmMemory.buffer.byteLength;
     
     if (requiredBytes > currentBytes) {
       const missingBytes = requiredBytes - currentBytes;
-      const missingPages = Math.ceil(missingBytes / 65536) + 5; // +5 pages safety
+      const missingPages = Math.ceil(missingBytes / 65536) + 10; // +10 pages padding
       console.log(`🔍 [DEBUGGER] Growing memory by ${missingPages} pages...`);
       wasmMemory.grow(missingPages);
     }
 
-    // 3. Write Data
+    // 3. Write Data (At safe pointer)
     const memView = new Uint8Array(wasmMemory.buffer);
     memView.set(new Uint8Array(buffer), filePointer);
 
@@ -89,8 +89,9 @@ export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
     
     // Check Result Magic
     const view = new DataView(result);
-    const magic = view.getUint32(0, true);
-    console.log(`✅ [DEBUGGER] Decryption Finished. Magic: ${magic} (Expect random if encrypted, valid if decrypted)`);
+    // Magic for PES 2021 decrypted file (should be valid integer, not random garbage)
+    const magic = view.getUint32(0, true); 
+    console.log(`✅ [DEBUGGER] Decryption Finished. Header Magic: ${magic}`);
 
     return result;
 
