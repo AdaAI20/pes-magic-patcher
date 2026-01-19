@@ -21,24 +21,14 @@ export async function initCrypto() {
     if (!response.ok) throw new Error(`WASM 404 at ${path}`);
     
     const bytes = await response.arrayBuffer();
-    const size = bytes.byteLength;
-    console.log(`🔍 [DEBUGGER] 2. WASM Downloaded. Size: ${size} bytes`);
 
-    // CHECK: Is this the Dummy file?
-    if (size < 1000) {
-        console.warn("🚨 [DEBUGGER] WARNING: This looks like the DUMMY file (<1KB).");
-        console.warn("🚨 [DEBUGGER] Real crypto requires the 21KB+ file.");
-    } else {
-        console.log("✅ [DEBUGGER] File size looks correct for Real Crypto.");
-    }
-
-    // Memory setup
+    // Create memory with enough initial space (200 pages = ~12.8MB)
     const memory = new WebAssembly.Memory({ initial: 200, maximum: 2000 });
     const { instance } = await WebAssembly.instantiate(bytes, { env: { memory } });
     
     wasmInstance = instance;
     
-    // Handle memory export differences
+    // Handle memory export
     if (instance.exports.memory) {
       wasmMemory = instance.exports.memory as WebAssembly.Memory;
     } else {
@@ -46,7 +36,7 @@ export async function initCrypto() {
     }
 
     cryptoReady = true;
-    console.log("🔍 [DEBUGGER] 3. Instantiated. Exports:", Object.keys(instance.exports));
+    console.log("✅ [DEBUGGER] WASM Initialized.");
 
   } catch (err) {
     console.error("🚨 [DEBUGGER] Init Failed:", err);
@@ -54,49 +44,53 @@ export async function initCrypto() {
 }
 
 export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
-  console.log("🔍 [DEBUGGER] 4. decryptEditBin called");
+  console.log("🔍 [DEBUGGER] decryptEditBin called");
 
   if (!cryptoReady || !wasmInstance || !wasmMemory) {
-    console.error("🚨 [DEBUGGER] CRITICAL: Crypto not ready yet! Returning raw buffer.");
+    console.warn("[CRYPTO] Not ready - passing through");
     return buffer.slice(0);
   }
 
   try {
-    const funcName = "decrypt_edit";
-    const func = wasmInstance.exports[funcName] as CallableFunction;
+    const func = wasmInstance.exports.decrypt_edit as CallableFunction;
+    const heapBase = wasmInstance.exports.__heap_base as WebAssembly.Global;
+    
+    // 1. Calculate Safe Pointer
+    // Rust allocator starts at __heap_base. 
+    // We leave 5MB gap after heap_base for Rust to use for its own internal vectors,
+    // and put our file data AFTER that.
+    const HEAP_START = heapBase ? heapBase.value : 1048576; // Default to 1MB if missing
+    const RUST_RESERVE = 5 * 1024 * 1024; // 5MB buffer for Rust's internal ops
+    const filePointer = HEAP_START + RUST_RESERVE;
+    const fileSize = buffer.byteLength;
 
-    if (!func) {
-      console.error(`🚨 [DEBUGGER] Function '${funcName}' NOT FOUND in WASM.`);
-      return buffer.slice(0);
+    // 2. Ensure Memory Size
+    // We need: Pointer location + File Size
+    const requiredBytes = filePointer + fileSize;
+    const currentBytes = wasmMemory.buffer.byteLength;
+    
+    if (requiredBytes > currentBytes) {
+      const missingBytes = requiredBytes - currentBytes;
+      const missingPages = Math.ceil(missingBytes / 65536) + 5; // +5 pages safety
+      console.log(`🔍 [DEBUGGER] Growing memory by ${missingPages} pages...`);
+      wasmMemory.grow(missingPages);
     }
 
-    const size = buffer.byteLength;
-    
-    // Memory Growth Logic
-    const currentPages = wasmMemory.buffer.byteLength / 65536;
-    const neededPages = Math.ceil(size / 65536) + 10;
-    
-    if (neededPages > currentPages) {
-      console.log(`🔍 [DEBUGGER] Growing memory...`);
-      wasmMemory.grow(neededPages - currentPages);
-    }
-
+    // 3. Write Data
     const memView = new Uint8Array(wasmMemory.buffer);
-    
-    // 1. Write
-    memView.set(new Uint8Array(buffer), 0);
+    memView.set(new Uint8Array(buffer), filePointer);
 
-    // 2. Execute
-    console.log(`🔍 [DEBUGGER] 5. Running Rust Decryption on ${size} bytes...`);
-    func(0, size);
+    // 4. Execute Rust (decrypt in-place at filePointer)
+    console.log(`🔍 [DEBUGGER] Running Decrypt at offset ${filePointer} (Size: ${fileSize})...`);
+    func(filePointer, fileSize);
 
-    // 3. Read
-    const result = memView.slice(0, size).buffer;
+    // 5. Read Result
+    const result = memView.slice(filePointer, filePointer + fileSize).buffer;
     
-    // Check Result header
+    // Check Result Magic
     const view = new DataView(result);
-    const magic = view.getUint32(0, true); // Should NOT be garbage if successful
-    console.log(`🔍 [DEBUGGER] 6. Decryption Done. Header Magic: ${magic}`);
+    const magic = view.getUint32(0, true);
+    console.log(`✅ [DEBUGGER] Decryption Finished. Magic: ${magic} (Expect random if encrypted, valid if decrypted)`);
 
     return result;
 
