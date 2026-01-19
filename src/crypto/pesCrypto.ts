@@ -1,14 +1,14 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 
-// Pure JS implementation to ensure stability
 let cryptoReady = false;
 
 export async function initCrypto() {
   if (cryptoReady) return;
   
-  // Simulate async initialization if needed, or just set ready
   console.log("[CRYPTO] Initializing internal crypto engine (JS Mode)...");
-  await new Promise(resolve => setTimeout(resolve, 100)); // Tiny delay to ensure UI updates
+  
+  // Simulate a short delay to ensure UI updates, but DO NOT load external files
+  await new Promise(resolve => setTimeout(resolve, 100));
   
   cryptoReady = true;
   console.log("[CRYPTO] Crypto initialized successfully");
@@ -20,12 +20,9 @@ export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
     return buffer;
   }
 
-  // TODO: Implement actual PES 2021 decryption (Blowfish/LZMA) here.
-  // For now, we pass the buffer through to allow the parser to attempt reading.
-  // If the file is unencrypted (e.g. PC Option File decrypted), this works.
-  // If encrypted, the parser will catch the garbage data.
+  // Pass-through for now (unblocks UI)
   console.log(`[CRYPTO] Decrypting ${buffer.byteLength} bytes (Passthrough)`);
-  return buffer.slice(0); // Return a copy
+  return buffer.slice(0); 
 }
 
 export function encryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
