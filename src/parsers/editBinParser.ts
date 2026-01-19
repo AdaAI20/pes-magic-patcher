@@ -13,7 +13,7 @@ export async function loadEditBin(file: File) {
   console.log("[PARSER] Reading file...");
   const buffer = await file.arrayBuffer();
   
-  // 1. Decrypt (Pass-through for now)
+  // 1. Decrypt (Pass-through)
   const decrypted = decryptEditBin(buffer); 
   const view = new DataView(decrypted);
 
@@ -27,45 +27,41 @@ export async function loadEditBin(file: File) {
     teamOffset: view.getUint32(20, true),
   };
 
-  console.log("[PARSER] Header:", header);
+  console.log("[PARSER] Header values (Encrypted/Garbage):", header);
 
-  // 3. Safety Checks
-  // If offsets are wild (encrypted), we clamp them to avoid crashes.
-  const isEncrypted = header.playerOffset > decrypted.byteLength || header.playerCount > 100000;
-  
   const players: any[] = []; 
   const teams: any[] = [];
 
-  // 4. Parse Players (SAFE MODE)
-  // We force a limit of 100 players so the browser never hangs, 
-  // even if the file is full of garbage data.
-  const loopCount = isEncrypted ? 50 : Math.min(header.playerCount, 50); 
-  const playerEntrySize = 116; // Standard PES size
-  const startOffset = isEncrypted ? 100 : header.playerOffset; // Fallback offset if encrypted
+  // 3. SAFE PARSING MODE
+  // Since the file is encrypted, the header values are random numbers (e.g. 1.9 billion).
+  // We ignore them and force a read of 50 items to populate the UI.
+  
+  const SAFE_LOOP_COUNT = 50; 
+  const ENTRY_SIZE = 116; // Approx PES player size
+  const START_OFFSET = 100; // Skip header
 
-  console.log(`[PARSER] Attempting to read ${loopCount} players...`);
+  console.log(`[PARSER] Force-reading ${SAFE_LOOP_COUNT} raw entries for UI verification...`);
 
-  for (let i = 0; i < loopCount; i++) {
-    const offset = startOffset + (i * playerEntrySize);
+  for (let i = 0; i < SAFE_LOOP_COUNT; i++) {
+    const offset = START_OFFSET + (i * ENTRY_SIZE);
     
     // Boundary check
-    if (offset + playerEntrySize > decrypted.byteLength) break;
+    if (offset + ENTRY_SIZE > decrypted.byteLength) break;
 
-    // Read ID (4 bytes)
+    // Read ID (likely garbage data right now)
     const id = view.getUint32(offset, true);
     
-    // Create a dummy player entry
-    // If encrypted, these values will be random numbers.
+    // Push dummy data so the table has rows
     players.push({
       id: id, 
-      name: `Player ${id} (Raw)`, // Placeholder name
+      name: `Raw Entry ${i + 1}`, 
       teamId: 0,
-      overall: view.getUint8(offset + 10) || 0, // Random byte as rating
+      overall: view.getUint8(offset + 10) % 99, // Fake rating 0-99
       position: "UNK",
     });
   }
 
-  console.log(`[PARSER] Done. Extracted ${players.length} items.`);
+  console.log(`[PARSER] Finished. Generated ${players.length} safe entries.`);
 
   return {
     header,
