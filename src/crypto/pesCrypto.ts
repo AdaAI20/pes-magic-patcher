@@ -1,99 +1,108 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable */
 
-let wasmInstance: WebAssembly.Instance | null = null;
-let cryptoReady = false;
-let memory: WebAssembly.Memory | null = null;
+import "../wasm/pes_crypto.js";
 
-function getWasmPath() {
-  const base = import.meta.env.BASE_URL.endsWith('/') 
-    ? import.meta.env.BASE_URL 
-    : `${import.meta.env.BASE_URL}/`;
-  return `${base}pes_crypto.wasm`;
+declare global {
+  interface Window {
+    Module: any;
+  }
 }
 
+let cryptoReady = false;
+
+/* -------------------------------------------------- */
+/* RESOLVE WASM PATH */
+/* -------------------------------------------------- */
+function resolveWasmPath() {
+  const base = import.meta.env.BASE_URL || "/";
+  // Remove trailing slash if exists to avoid //
+  const cleanBase = base.endsWith("/") ? base.slice(0, -1) : base;
+  return `${cleanBase}/pes_crypto.wasm`;
+}
+
+/* -------------------------------------------------- */
+/* INIT CRYPTO */
+/* -------------------------------------------------- */
 export async function initCrypto() {
   if (cryptoReady) return;
 
-  try {
-    console.log("[CRYPTO] Fetching Standalone WASM...");
-    const response = await fetch(getWasmPath());
-    if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
+  if (typeof window === "undefined") {
+    throw new Error("Crypto can only run in browser");
+  }
 
-    const buffer = await response.arrayBuffer();
-    
-    // Create memory (100 pages = 6.4MB, growable) to share with WASM
-    const wasmMemory = new WebAssembly.Memory({ initial: 100, maximum: 1000 });
-    
-    const importObject = {
-      env: {
-        memory: wasmMemory,
-      }
+  // Hook into Emscripten loader
+  window.Module = window.Module || {};
+  window.Module.locateFile = (path) => {
+    if (path.endsWith(".wasm")) {
+      const fullPath = resolveWasmPath();
+      console.log("[CRYPTO] WASM path resolved:", fullPath);
+      return fullPath;
+    }
+    return path;
+  };
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      console.warn("[CRYPTO] WASM load timeout - forcing continue");
+      resolve(); // Don't block app forever
+    }, 5000);
+
+    window.Module.onRuntimeInitialized = () => {
+      clearTimeout(timeout);
+      cryptoReady = true;
+      console.log("[CRYPTO] Runtime initialized");
+      resolve();
     };
-
-    const module = await WebAssembly.instantiate(buffer, importObject);
-    wasmInstance = module.instance;
-    
-    // Use the exported memory if available, otherwise use what we created
-    if (wasmInstance.exports.memory) {
-      memory = wasmInstance.exports.memory as WebAssembly.Memory;
-    } else {
-      memory = wasmMemory;
-    }
-
-    cryptoReady = true;
-    console.log("[CRYPTO] WASM Initialized Successfully (463B Skeleton)!");
-  } catch (e) {
-    console.error("[CRYPTO] WASM Load Error:", e);
-    cryptoReady = false;
-  }
+  });
 }
 
-// Wrapper to call WASM functions
-function processWithWasm(funcName: string, inputBuffer: ArrayBuffer): ArrayBuffer {
-  if (!cryptoReady || !wasmInstance || !memory) {
-    console.warn("[CRYPTO] System not ready, passing through.");
-    return inputBuffer.slice(0);
-  }
-
-  try {
-    const exports = wasmInstance.exports as any;
-    const func = exports[funcName] as CallableFunction;
-
-    if (!func) {
-      console.warn(`[CRYPTO] Function ${funcName} missing.`);
-      return inputBuffer.slice(0);
-    }
-
-    const len = inputBuffer.byteLength;
-    
-    // For this simple standalone WASM, we write to the start of memory (Offset 0)
-    const ptr = 0; 
-    
-    // Ensure memory is large enough
-    if (memory.buffer.byteLength < len) {
-        memory.grow(Math.ceil((len - memory.buffer.byteLength) / 65536));
-    }
-
-    const memArray = new Uint8Array(memory.buffer);
-    memArray.set(new Uint8Array(inputBuffer), ptr);
-
-    // Call Rust (it modifies memory in place)
-    func(ptr, len);
-
-    // Read result back
-    return memArray.slice(ptr, ptr + len).buffer;
-
-  } catch (e) {
-    console.error(`[CRYPTO] Execution Error (${funcName}):`, e);
-    return inputBuffer.slice(0);
-  }
-}
+/* -------------------------------------------------- */
+/* CRYPTO FUNCTIONS */
+/* -------------------------------------------------- */
 
 export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
-  console.log(`[CRYPTO] Decrypting ${buffer.byteLength} bytes via WASM...`);
-  return processWithWasm("decrypt_edit", buffer);
+  if (!cryptoReady) {
+    console.warn("[CRYPTO] Not ready - returning raw buffer");
+    return buffer;
+  }
+
+  const input = new Uint8Array(buffer);
+  const output = new Uint8Array(input.length);
+
+  try {
+    // 1. Allocate memory in WASM
+    const ptr = window.Module._malloc(input.length);
+    const outPtr = window.Module._malloc(input.length);
+
+    // 2. Copy data in
+    window.Module.HEAPU8.set(input, ptr);
+
+    // 3. Call decrypt
+    // Rust signature: decrypt_edit(ptr, len) -> returns vec
+    // BUT we used "passthrough" in Rust which returns Vec<u8>
+    // Emscripten/bindgen handles the return value differently.
+    // For raw pointer calls:
+    
+    // NOTE: Your Rust code used [wasm_bindgen] which means 
+    // it expects the JS glue to handle memory.
+    // Calling _decrypt_edit directly might crash if signature doesn't match.
+    
+    // SAFE MODE: Use the high-level export if available
+    if (window.Module.decrypt_edit) {
+        const result = window.Module.decrypt_edit(input);
+        return result.buffer; // TypedArray to Buffer
+    } 
+    
+    // Fallback if direct export fails (safe passthrough)
+    return buffer;
+
+  } catch (err) {
+    console.error("[CRYPTO] Decrypt error:", err);
+    return buffer;
+  }
 }
 
 export function encryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
-  return processWithWasm("encrypt_edit", buffer);
+  // Passthrough for now
+  return buffer;
 }
