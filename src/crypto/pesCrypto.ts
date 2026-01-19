@@ -57,40 +57,40 @@ export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
     
     // 1. Calculate Safe Pointer
     // Rust allocator starts at __heap_base. 
-    // We leave a 5MB safety gap AFTER heap_base for Rust variables/stack.
-    // We write the file AFTER that gap.
-    const HEAP_START = heapBase ? heapBase.value : 1048576; // Default to 1MB if symbol missing
-    const RUST_RESERVE = 5 * 1024 * 1024; // 5MB buffer for Rust's internal use
+    // We leave a 5MB gap for Rust internal allocations.
+    const HEAP_START = heapBase ? heapBase.value : 1048576; 
+    const RUST_RESERVE = 5 * 1024 * 1024; 
     const filePointer = HEAP_START + RUST_RESERVE;
     const fileSize = buffer.byteLength;
 
     // 2. Ensure Memory Size
-    // We need space for: Pointer location + File Size
     const requiredBytes = filePointer + fileSize;
     const currentBytes = wasmMemory.buffer.byteLength;
     
     if (requiredBytes > currentBytes) {
       const missingBytes = requiredBytes - currentBytes;
-      const missingPages = Math.ceil(missingBytes / 65536) + 10; // +10 pages padding
+      const missingPages = Math.ceil(missingBytes / 65536) + 10;
       console.log(`🔍 [DEBUGGER] Growing memory by ${missingPages} pages...`);
       wasmMemory.grow(missingPages);
     }
 
-    // 3. Write Data (At safe pointer)
-    const memView = new Uint8Array(wasmMemory.buffer);
-    memView.set(new Uint8Array(buffer), filePointer);
+    // 3. Write Data
+    // Get a FRESH view of the memory
+    new Uint8Array(wasmMemory.buffer).set(new Uint8Array(buffer), filePointer);
 
     // 4. Execute Rust (decrypt in-place at filePointer)
     console.log(`🔍 [DEBUGGER] Running Decrypt at offset ${filePointer} (Size: ${fileSize})...`);
     func(filePointer, fileSize);
 
     // 5. Read Result
-    const result = memView.slice(filePointer, filePointer + fileSize).buffer;
+    // 🔥 CRITICAL FIX: Re-acquire the buffer here because Rust might have grown memory,
+    // detaching the previous view.
+    const freshMemView = new Uint8Array(wasmMemory.buffer);
+    const result = freshMemView.slice(filePointer, filePointer + fileSize).buffer;
     
     // Check Result Magic
     const view = new DataView(result);
-    // Magic for PES 2021 decrypted file (should be valid integer, not random garbage)
-    const magic = view.getUint32(0, true); 
+    const magic = view.getUint32(0, true);
     console.log(`✅ [DEBUGGER] Decryption Finished. Header Magic: ${magic}`);
 
     return result;
@@ -102,5 +102,6 @@ export function decryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
 }
 
 export function encryptEditBin(buffer: ArrayBuffer): ArrayBuffer {
+  // Pass through for now
   return buffer.slice(0);
 }
