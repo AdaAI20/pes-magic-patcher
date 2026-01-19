@@ -13,46 +13,59 @@ export async function loadEditBin(file: File) {
   console.log("[PARSER] Reading file...");
   const buffer = await file.arrayBuffer();
   
-  // 1. Decrypt (Pass-through mode for now)
+  // 1. Decrypt (currently pass-through)
   const decrypted = decryptEditBin(buffer); 
   const view = new DataView(decrypted);
 
   // 2. Parse Header (PES 2021)
   const header: EditHeader = {
-    magic: view.getUint32(0, true),        // 0x00
-    fileSize: view.getUint32(4, true),     // 0x04
-    playerCount: view.getUint32(8, true),  // 0x08
-    teamCount: view.getUint32(12, true),   // 0x0C
-    playerOffset: view.getUint32(16, true),// 0x10
-    teamOffset: view.getUint32(20, true),  // 0x14
+    magic: view.getUint32(0, true),
+    fileSize: view.getUint32(4, true),
+    playerCount: view.getUint32(8, true),
+    teamCount: view.getUint32(12, true),
+    playerOffset: view.getUint32(16, true),
+    teamOffset: view.getUint32(20, true),
   };
 
-  console.log("[PARSER] Header parsed:", header);
+  console.log("[PARSER] Raw Header Values:", header);
 
-  // 3. Basic Validation to prevent crashes on encrypted files
-  // If player count is massive (random bytes), clamp it.
-  const safePlayerCount = (header.playerCount > 30000 || header.playerCount < 0) 
-    ? 0 
-    : header.playerCount;
+  // 3. SANITY CHECK (The Fix for Infinite Loading)
+  // A valid EDIT file typically has ~20,000 players max. 
+  // If we see > 50,000, the file is definitely encrypted/garbage.
+  const isEncrypted = header.playerCount > 50000 || header.playerOffset > decrypted.byteLength;
 
   const players: any[] = []; 
   const teams: any[] = [];
 
-  // 4. Generate Placeholder Data
-  // This ensures the UI has something to show, proving the load worked.
-  if (safePlayerCount > 0) {
-    for (let i = 0; i < Math.min(safePlayerCount, 100); i++) {
-        players.push({
-            id: i,
-            name: `Player ${i}`,
-            teamId: 0,
-            overall: 75,
-            position: "CF"
-        });
-    }
+  if (isEncrypted) {
+    console.warn("[PARSER] Detected encrypted/garbage data. Skipping parse loop to prevent crash.");
+    // We return empty arrays so the UI finishes loading successfully, 
+    // rather than hanging forever.
   } else {
-      console.warn("[PARSER] Player count seems invalid or file is encrypted. Returning empty list.");
+    // Only loop if data looks real
+    const safeCount = Math.min(header.playerCount, 50000); 
+    const playerEntrySize = 116; // Approx size
+
+    for (let i = 0; i < safeCount; i++) {
+      // Safety break to prevent reading past file end
+      if (header.playerOffset + (i * playerEntrySize) >= decrypted.byteLength - 4) break;
+
+      const offset = header.playerOffset + (i * playerEntrySize);
+      const id = view.getUint32(offset, true);
+      
+      if (id !== 0) {
+        players.push({
+          id,
+          name: `Player ${id}`,
+          teamId: 0,
+          overall: 0,
+          position: "UNK",
+        });
+      }
+    }
   }
+
+  console.log(`[PARSER] Finished. Loaded ${players.length} players.`);
 
   return {
     header,
