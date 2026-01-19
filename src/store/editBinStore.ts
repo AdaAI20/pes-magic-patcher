@@ -27,7 +27,7 @@ interface EditBinState {
   header: EditBinHeader | null;
   players: Player[];
 
-  // UPDATED: Now accepts players array directly
+  // Action: Now accepts the pre-parsed players list
   loadEditBin: (data: {
     header: EditBinHeader;
     raw: ArrayBuffer;
@@ -37,7 +37,7 @@ interface EditBinState {
   clear: () => void;
 }
 
-/* -------------------------------- ZUSTAND STORE -------------------------------- */
+/* -------------------------------- STORE -------------------------------- */
 
 export const useEditBinStore = create<EditBinState>()((set) => ({
   loaded: false,
@@ -48,15 +48,13 @@ export const useEditBinStore = create<EditBinState>()((set) => ({
   loadEditBin: ({ header, raw, players }) =>
     set(
       produce((state: EditBinState) => {
-        console.log("[STORE] Updating state...", { 
-          loaded: true, 
-          playerCount: players.length 
-        });
-
+        // Just store the data. Do NOT try to parse it again.
+        console.log(`[STORE] Saving state: ${players.length} players.`);
+        
         state.loaded = true;
         state.header = header;
         state.rawBuffer = raw;
-        state.players = players;
+        state.players = players; // Use the safe list from the parser
       })
     ),
 
