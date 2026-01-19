@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  Search, Filter, Plus, Download, Upload, MoreHorizontal, Edit, Trash2, Copy, ChevronLeft, ChevronRight,
+  Search, Filter, Plus, Download, Upload, MoreHorizontal, Edit, Trash2, Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,24 +12,23 @@ import { useFileStore } from "@/store/fileStore";
 const positions = ["All", "GK", "CB", "LB", "RB", "DMF", "CMF", "AMF", "LWF", "RWF", "SS", "CF"];
 
 export default function Players() {
-  // Connect to global file store
   const editBin = useFileStore((state) => state.editBin);
   const players = editBin?.players || [];
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPosition, setSelectedPosition] = useState("All");
   
-  // Filter Logic
+  // Basic filtering
   const filteredPlayers = players.filter((player: any) => {
+    // If data is garbage/raw, handle missing fields gracefully
+    const pName = player.name || "";
+    const pId = player.id ? player.id.toString() : "";
     const searchLower = searchQuery.toLowerCase();
-    const nameMatch = player.name?.toLowerCase().includes(searchLower);
-    const idMatch = player.id?.toString().includes(searchLower);
     
-    // Safety check for position
-    const pos = player.position || "UNK";
-    const posMatch = selectedPosition === "All" || pos === selectedPosition;
+    const matchesSearch = pName.toLowerCase().includes(searchLower) || pId.includes(searchLower);
+    const matchesPosition = selectedPosition === "All" || player.position === selectedPosition;
 
-    return (nameMatch || idMatch) && posMatch;
+    return matchesSearch && matchesPosition;
   });
 
   const getOverallColor = (overall: number) => {
@@ -49,13 +48,11 @@ export default function Players() {
           {!editBin ? (
             <p className="text-destructive font-medium">No File Loaded. Please go to Import.</p>
           ) : (
-            <p className="text-muted-foreground">{players.length.toLocaleString()} players loaded</p>
+            <p className="text-muted-foreground">{players.length} entries loaded (Raw Mode)</p>
           )}
         </div>
-        {/* Buttons... (Keep existing buttons) */}
       </div>
 
-      {/* Filters (Keep existing filters) */}
       <div className="card-gaming p-4">
         <div className="flex flex-col sm:flex-row gap-4">
            <Input 
@@ -65,17 +62,15 @@ export default function Players() {
              className="pl-10"
              disabled={!editBin} 
            />
-           {/* ... other filters ... */}
         </div>
       </div>
 
-      {/* Table */}
       <div className="card-gaming overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-border bg-muted/30">
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase">ID</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase">ID (Raw)</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Name</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold uppercase">OVR</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold uppercase">Pos</th>
@@ -86,12 +81,12 @@ export default function Players() {
               {filteredPlayers.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="p-8 text-center text-muted-foreground">
-                    {editBin ? "No players found matching filters." : "Import a file to see players."}
+                    {editBin ? "No players found." : "Import a file first."}
                   </td>
                 </tr>
               ) : (
-                filteredPlayers.map((player: any) => (
-                  <tr key={player.id} className="table-row-gaming">
+                filteredPlayers.map((player: any, index: number) => (
+                  <tr key={index} className="table-row-gaming">
                     <td className="px-4 py-3 font-mono text-sm">{player.id}</td>
                     <td className="px-4 py-3 font-medium">{player.name}</td>
                     <td className="px-4 py-3 text-center">
