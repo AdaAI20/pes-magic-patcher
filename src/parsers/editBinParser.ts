@@ -9,11 +9,23 @@ export interface EditHeader {
   teamOffset: number;
 }
 
+// Helper to read strings (PES uses UTF-8 or ASCII usually)
+function readString(view: DataView, offset: number, maxLength: number): string {
+  let str = "";
+  for (let i = 0; i < maxLength; i++) {
+    const charCode = view.getUint8(offset + i);
+    if (charCode === 0) break; // Null terminator
+    str += String.fromCharCode(charCode);
+  }
+  // Clean up garbage characters if encrypted
+  return str.replace(/[^\x20-\x7E]/g, "?");
+}
+
 export async function loadEditBin(file: File) {
   console.log("[PARSER] Reading file...");
   const buffer = await file.arrayBuffer();
   
-  // 1. Decrypt (Pass-through)
+  // 1. Decrypt (Currently Pass-through)
   const decrypted = decryptEditBin(buffer); 
   const view = new DataView(decrypted);
 
@@ -27,41 +39,58 @@ export async function loadEditBin(file: File) {
     teamOffset: view.getUint32(20, true),
   };
 
-  console.log("[PARSER] Header values (Encrypted/Garbage):", header);
+  console.log("[PARSER] Header:", header);
 
   const players: any[] = []; 
   const teams: any[] = [];
 
-  // 3. SAFE PARSING MODE
-  // Since the file is encrypted, the header values are random numbers (e.g. 1.9 billion).
-  // We ignore them and force a read of 50 items to populate the UI.
+  // 3. Setup Loop
+  // PES 2021 Player Entry Size is typically 116 bytes
+  const ENTRY_SIZE = 116; 
   
-  const SAFE_LOOP_COUNT = 50; 
-  const ENTRY_SIZE = 116; // Approx PES player size
-  const START_OFFSET = 100; // Skip header
+  // Detect if encrypted based on header values (if count is huge, it's encrypted)
+  const isEncrypted = header.playerCount > 50000;
+  
+  // If encrypted, we just read 50 rows starting at offset 100 to show "something"
+  // If valid, we use the real header values
+  const loopCount = isEncrypted ? 50 : Math.min(header.playerCount, 2000);
+  const startOffset = isEncrypted ? 100 : header.playerOffset;
 
-  console.log(`[PARSER] Force-reading ${SAFE_LOOP_COUNT} raw entries for UI verification...`);
+  console.log(`[PARSER] Reading ${loopCount} players from offset ${startOffset}...`);
 
-  for (let i = 0; i < SAFE_LOOP_COUNT; i++) {
-    const offset = START_OFFSET + (i * ENTRY_SIZE);
+  for (let i = 0; i < loopCount; i++) {
+    const offset = startOffset + (i * ENTRY_SIZE);
     
-    // Boundary check
     if (offset + ENTRY_SIZE > decrypted.byteLength) break;
 
-    // Read ID (likely garbage data right now)
+    // --- PES 2021 Player Structure Mapping (Approximate) ---
+    // 0x00: Player ID (4 bytes)
+    // 0x04: Unknown / ID related
+    // 0x42: Player Name (Assume ~30 bytes max)
+    // 0x??: Stats (To be mapped later)
+    
     const id = view.getUint32(offset, true);
     
-    // Push dummy data so the table has rows
-    players.push({
-      id: id, 
-      name: `Raw Entry ${i + 1}`, 
-      teamId: 0,
-      overall: view.getUint8(offset + 10) % 99, // Fake rating 0-99
-      position: "UNK",
-    });
+    // Attempt to read name at offset + 66 (0x42) - This is a common name position
+    // If encrypted, this will result in "??????"
+    const name = readString(view, offset + 66, 32); 
+
+    // Fake stat reading for UI test
+    const overall = view.getUint8(offset + 10) % 99; 
+
+    // We only add the player if it has a non-zero ID
+    if (id !== 0) {
+      players.push({
+        id: id, 
+        name: name.length > 1 ? name : `Player ${id} (No Name)`, 
+        teamId: 0,
+        overall: overall,
+        position: "CF", // Placeholder
+      });
+    }
   }
 
-  console.log(`[PARSER] Finished. Generated ${players.length} safe entries.`);
+  console.log(`[PARSER] Done. Loaded ${players.length} items.`);
 
   return {
     header,
