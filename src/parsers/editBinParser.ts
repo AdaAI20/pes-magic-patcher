@@ -12,13 +12,16 @@ export interface EditHeader {
 export async function loadEditBin(file: File) {
   const buffer = await file.arrayBuffer();
   
-  // 1. Decrypt
-  // Note: ensure pesCrypto.ts exports 'decryptEditBin'
+  // 1. Decrypt (currently pass-through)
   const decrypted = decryptEditBin(buffer); 
   const view = new DataView(decrypted);
 
-  // 2. Parse Header (PES 2021 Structure - Little Endian)
-  // These offsets are standard for EDIT00000000
+  // 2. Safety Check: Ensure file is large enough
+  if (decrypted.byteLength < 32) {
+    throw new Error("File is too small to be a valid EDIT file.");
+  }
+
+  // 3. Parse Header (PES 2021 Structure)
   const header: EditHeader = {
     magic: view.getUint32(0, true),        // 0x00
     fileSize: view.getUint32(4, true),     // 0x04
@@ -28,31 +31,60 @@ export async function loadEditBin(file: File) {
     teamOffset: view.getUint32(20, true),  // 0x14
   };
 
-  console.log("[PARSER] Header parsed:", header);
+  console.log("[PARSER] Raw Header Values:", header);
 
-  // 3. Validation (Optional but good for debugging)
-  if (header.playerOffset === 0 || header.playerOffset > decrypted.byteLength) {
-    console.warn("[PARSER] Suspicious player offset:", header.playerOffset);
+  // 4. Validate Header
+  // A valid decrypted EDIT file usually has specific offsets.
+  // If offsets are massive integers, the file is likely still encrypted.
+  if (header.playerOffset > decrypted.byteLength || header.playerOffset < 32) {
+    console.warn("[PARSER] header looks invalid (Encrypted?). returning raw data structure.");
+    // We throw here so the UI knows something went wrong with parsing, 
+    // or you can return a specific error state.
+    // For now, we return empty data to prevent UI crash.
+    return {
+      header,
+      players: [],
+      teams: [],
+      raw: decrypted
+    };
   }
 
-  // 4. Placeholder for parsing lists (We will implement the loop later)
-  // Returning empty arrays prevents the UI from crashing
-  const players: any[] = []; 
-  const teams: any[] = [];
+  // 5. Parse Players
+  const players: any[] = [];
+  // Use header info, but force safe limits
+  const safePlayerCount = Math.min(header.playerCount, 30000); 
+  const playerEntrySize = 116; // Approx size, depends on exact PES version
 
-  // 5. Return structure matching fileStore.ts expectation
+  // Only attempt loop if offsets look reasonable
+  if (header.playerOffset + (safePlayerCount * playerEntrySize) <= decrypted.byteLength) {
+    for (let i = 0; i < safePlayerCount; i++) {
+      const offset = header.playerOffset + (i * playerEntrySize);
+      const id = view.getUint32(offset, true);
+      
+      // Basic filter for empty slots
+      if (id !== 0) {
+        players.push({
+          id,
+          name: `Player ${id}`, // Placeholder until string table logic added
+          teamId: 0,
+          overall: 0,
+          position: "UNK",
+        });
+      }
+    }
+  }
+
+  const teams: any[] = []; // Implement Team parsing similarly if needed
+
   return {
     header,
     players,
     teams,
-    raw: decrypted // Keep raw buffer for re-saving later
+    raw: decrypted 
   };
 }
 
 export function exportEditBin(data: ArrayBuffer) {
-  // 1. Encrypt
   const encrypted = encryptEditBin(data);
-  
-  // 2. Return Blob for download
   return new Blob([encrypted], { type: "application/octet-stream" });
 }
