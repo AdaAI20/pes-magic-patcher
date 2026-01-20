@@ -60,8 +60,6 @@ interface EditBinStore {
   getPlayers: () => Player[];
   getTeams: () => Team[];
   getLeagues: () => League[];
-  updatePlayer: (id: number, updates: Partial<Player>) => void;
-  updateTeam: (id: number, updates: Partial<Team>) => void;
 }
 
 export const useEditBinStore = create<EditBinStore>((set, get) => ({
@@ -70,15 +68,20 @@ export const useEditBinStore = create<EditBinStore>((set, get) => ({
   fileName: null,
 
   loadEditBin: (data: EditBinData, fileName?: string) => {
-    console.log('[STORE] Saving state:', data.players.length, 'players,', data.teams.length, 'teams.');
+    // Safe access with defaults
+    const players = data.players || [];
+    const teams = data.teams || [];
+    const leagues = data.leagues || [];
     
-    // Also save to localStorage for persistence
+    console.log('[STORE] Saving state:', players.length, 'players,', teams.length, 'teams,', leagues.length, 'leagues.');
+    
+    // Save to localStorage for persistence
     try {
       const toSave = {
         header: data.header,
-        players: data.players,
-        teams: data.teams,
-        leagues: data.leagues,
+        players: players,
+        teams: teams,
+        leagues: leagues,
         fileName: fileName || null,
       };
       localStorage.setItem('pes-edit-data', JSON.stringify(toSave));
@@ -87,7 +90,12 @@ export const useEditBinStore = create<EditBinStore>((set, get) => ({
     }
     
     set({ 
-      data, 
+      data: {
+        ...data,
+        players,
+        teams,
+        leagues,
+      }, 
       isLoaded: true,
       fileName: fileName || null 
     });
@@ -102,16 +110,13 @@ export const useEditBinStore = create<EditBinStore>((set, get) => ({
     const state = get();
     if (state.data?.players) return state.data.players;
     
-    // Try to load from localStorage
     try {
       const saved = localStorage.getItem('pes-edit-data');
       if (saved) {
         const parsed = JSON.parse(saved);
         return parsed.players || [];
       }
-    } catch (e) {
-      console.warn('[STORE] Could not load from localStorage');
-    }
+    } catch (e) {}
     return [];
   },
 
@@ -142,32 +147,6 @@ export const useEditBinStore = create<EditBinStore>((set, get) => ({
     } catch (e) {}
     return [];
   },
-
-  updatePlayer: (id: number, updates: Partial<Player>) => {
-    const state = get();
-    if (!state.data) return;
-    
-    const players = state.data.players.map(p => 
-      p.id === id ? { ...p, ...updates } : p
-    );
-    
-    set({
-      data: { ...state.data, players }
-    });
-  },
-
-  updateTeam: (id: number, updates: Partial<Team>) => {
-    const state = get();
-    if (!state.data) return;
-    
-    const teams = state.data.teams.map(t => 
-      t.id === id ? { ...t, ...updates } : t
-    );
-    
-    set({
-      data: { ...state.data, teams }
-    });
-  },
 }));
 
 // Initialize from localStorage on app load
@@ -176,17 +155,17 @@ if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('pes-edit-data');
     if (saved) {
       const parsed = JSON.parse(saved);
-      console.log('[STORE] Restoring from localStorage:', parsed.players?.length, 'players');
+      console.log('[STORE] Restoring from localStorage:', parsed.players?.length || 0, 'players');
       useEditBinStore.setState({
         data: {
-          header: parsed.header,
-          raw: new ArrayBuffer(0), // Can't restore raw buffer from localStorage
+          header: parsed.header || { magic: 0, version: 0, fileSize: 0, playerCount: 0, teamCount: 0 },
+          raw: new ArrayBuffer(0),
           players: parsed.players || [],
           teams: parsed.teams || [],
           leagues: parsed.leagues || [],
         },
         isLoaded: true,
-        fileName: parsed.fileName,
+        fileName: parsed.fileName || null,
       });
     }
   } catch (e) {
