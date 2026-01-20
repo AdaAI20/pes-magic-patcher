@@ -1,3 +1,4 @@
+// src/pages/Import.tsx
 import { useRef, useState } from "react";
 import {
   Upload, FileArchive, FileText, Database, FolderOpen, X, HardDrive,
@@ -61,14 +62,16 @@ export default function Import() {
 
       const result = await loadEditBin(file);
 
-      // 🔥 PASS PLAYERS TO STORE
+      // Pass ALL data to store (players, teams, leagues)
       loadEditBinToStore({
         header: result.header,
         raw: result.raw,
-        players: result.players, 
-      });
+        players: result.players || [],
+        teams: result.teams || [],
+        leagues: result.leagues || [],
+      }, file.name);
 
-      console.log(`[IMPORT] Success! ${result.players.length} players stored.`);
+      console.log(`[IMPORT] Success! ${result.players?.length || 0} players, ${result.teams?.length || 0} teams stored.`);
       updateStatus(index, "loaded");
     } catch (err) {
       console.error("[IMPORT] Failed:", err);
