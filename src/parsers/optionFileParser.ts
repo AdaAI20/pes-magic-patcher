@@ -1,15 +1,16 @@
 // src/parsers/optionFileParser.ts
-// PES 2021 EDIT file parser - Final version with ASCII names
+// PES 2021 EDIT file parser - FINAL VERSION
 
 import { decryptEditBin, initCrypto } from '../crypto/pesCrypto';
 
-// Header structure
-const HEADER = {
-  VERSION: 0x00,
-  HEADER_SIZE: 0x04,
-  DATA_SIZE: 0x08,
-  PLAYER_COUNT: 0x0C,
-};
+// File structure constants
+const HEADER_SIZE = 80;           // 0x50
+const PLAYER_ENTRY_SIZE = 312;    // 0x138
+const FIRST_PLAYER_OFFSET = 178;  // 0xB2 - where first name starts
+
+// Within each 312-byte entry, name is at offset 98 (0x62) from entry start
+// Entry start = 0xB2 - 0x62 = 0x50 (80) = right after header!
+const NAME_OFFSET_IN_ENTRY = 98;  // 0x62
 
 export interface Player {
   id: number;
@@ -31,7 +32,7 @@ export interface ParsedEditData {
 }
 
 export async function parseOptionFile(file: File): Promise<ParsedEditData> {
-  console.log('[PARSER] Starting to parse:', file.name);
+  console.log('[PARSER] Parsing:', file.name);
   
   await initCrypto();
   
@@ -43,23 +44,25 @@ export async function parseOptionFile(file: File): Promise<ParsedEditData> {
   console.log('[PARSER] File size:', data.length);
 
   // Read header
-  const version = view.getUint32(HEADER.VERSION, true);
-  const headerSize = view.getUint32(HEADER.HEADER_SIZE, true);
-  const dataSize = view.getUint32(HEADER.DATA_SIZE, true);
-  const playerCount = view.getUint32(HEADER.PLAYER_COUNT, true);
+  const version = view.getUint32(0, true);
+  const headerSize = view.getUint32(4, true);
+  const dataSize = view.getUint32(8, true);
+  const playerCountHeader = view.getUint32(12, true);
   
-  console.log('[PARSER] Version:', version, 'Header:', headerSize, 'Players:', playerCount);
+  console.log('[PARSER] Version:', version);
+  console.log('[PARSER] Header size:', headerSize);
+  console.log('[PARSER] Player count (header):', playerCountHeader);
 
-  // Validate - check if it's a valid decrypted file
+  // Validate decrypted file
   if (version > 100 || headerSize === 0 || headerSize > 500) {
-    console.log('[PARSER] File may not be properly decrypted');
+    console.log('[PARSER] ⚠️ File may not be properly decrypted');
     return { players: [], teams: [], version: 0, playerCount: 0 };
   }
 
-  // Find all real player names
-  const players = extractPlayers(data, view, headerSize, playerCount);
+  // Parse players using fixed structure
+  const players = parsePlayersFixed(data, view, headerSize, playerCountHeader);
   
-  console.log('[PARSER] ✅ Extracted', players.length, 'players');
+  console.log('[PARSER] ✅ Loaded', players.length, 'players');
   
   return {
     players,
@@ -69,217 +72,133 @@ export async function parseOptionFile(file: File): Promise<ParsedEditData> {
   };
 }
 
-function extractPlayers(
+function parsePlayersFixed(
   data: Uint8Array,
   view: DataView,
   headerSize: number,
   expectedCount: number
 ): Player[] {
   const players: Player[] = [];
-  const namePositions: Array<{ offset: number; name: string }> = [];
+  const seenNames = new Set<string>();
   
-  // First pass: find all REAL player names (strict validation)
-  for (let i = headerSize; i < data.length - 20 && namePositions.length < expectedCount * 2; i++) {
-    if (isRealNameStart(data, i)) {
-      const name = readPlayerName(data, i);
-      
-      if (isRealPlayerName(name)) {
-        namePositions.push({ offset: i, name });
-        i += name.length; // Skip past this name
-      }
-    }
-  }
+  // Player entries start right after header
+  const entryStart = headerSize; // 80 bytes
+  const maxPlayers = Math.min(expectedCount, 15000);
   
-  console.log('[PARSER] Found', namePositions.length, 'name candidates');
+  console.log('[PARSER] Entry start:', entryStart, 'Entry size:', PLAYER_ENTRY_SIZE);
   
-  if (namePositions.length === 0) {
-    return [];
-  }
-  
-  // Log first 10 names for debugging
-  console.log('[PARSER] First 10 names:');
-  namePositions.slice(0, 10).forEach((n, i) => {
-    console.log(`  ${i + 1}. "${n.name}" at 0x${n.offset.toString(16)}`);
-  });
-  
-  // Analyze entry structure
-  // Names often appear multiple times per player (display name, shirt name, etc.)
-  // Find the typical spacing between unique players
-  
-  const uniqueNames = new Map<string, number>();
-  for (const { offset, name } of namePositions) {
-    // Only keep first occurrence of each name
-    if (!uniqueNames.has(name)) {
-      uniqueNames.set(name, offset);
-    }
-  }
-  
-  console.log('[PARSER] Unique names:', uniqueNames.size);
-  
-  // Convert to player entries
-  const offsets = Array.from(uniqueNames.entries());
-  offsets.sort((a, b) => a[1] - b[1]); // Sort by offset
-  
-  // Calculate typical entry size
-  const gaps: number[] = [];
-  for (let i = 1; i < Math.min(50, offsets.length); i++) {
-    const gap = offsets[i][1] - offsets[i - 1][1];
-    if (gap > 50 && gap < 1000) { // Reasonable entry size range
-      gaps.push(gap);
-    }
-  }
-  
-  // Find most common gap (entry size)
-  const gapCount: Record<number, number> = {};
-  for (const gap of gaps) {
-    // Round to nearest 8 bytes (common alignment)
-    const rounded = Math.round(gap / 8) * 8;
-    gapCount[rounded] = (gapCount[rounded] || 0) + 1;
-  }
-  
-  let entrySize = 312; // Default
-  let maxCount = 0;
-  for (const [size, count] of Object.entries(gapCount)) {
-    if (count > maxCount) {
-      maxCount = count;
-      entrySize = parseInt(size);
-    }
-  }
-  
-  console.log('[PARSER] Detected entry size:', entrySize);
-  
-  // Create player entries
-  for (let i = 0; i < offsets.length && players.length < expectedCount; i++) {
-    const [name, nameOffset] = offsets[i];
+  for (let i = 0; i < maxPlayers; i++) {
+    const offset = entryStart + (i * PLAYER_ENTRY_SIZE);
     
-    // Estimate entry start (name is usually not at beginning of entry)
-    // Look backwards for a reasonable ID
-    let id = players.length + 1;
-    let entryStart = nameOffset;
-    
-    // Try to find player ID before the name
-    for (let backOffset = 4; backOffset <= 100; backOffset += 4) {
-      if (nameOffset - backOffset < headerSize) break;
-      
-      const possibleId = view.getUint32(nameOffset - backOffset, true);
-      if (possibleId > 0 && possibleId < 0xFFFFFF) {
-        // This could be the player ID
-        id = possibleId;
-        entryStart = nameOffset - backOffset;
-        break;
-      }
+    if (offset + PLAYER_ENTRY_SIZE > data.length) {
+      console.log('[PARSER] Reached end of file at entry', i);
+      break;
     }
     
-    // Look for shirt name (usually after player name, all uppercase)
+    // Read player name at fixed offset within entry
+    const nameOffset = offset + NAME_OFFSET_IN_ENTRY;
+    const name = readAsciiName(data, nameOffset, 46);
+    
+    // Skip if no valid name or duplicate
+    if (!name || name.length < 3) continue;
+    if (!isValidPlayerName(name)) continue;
+    if (seenNames.has(name)) continue;
+    
+    seenNames.add(name);
+    
+    // Read player ID (usually at entry start)
+    let id = view.getUint32(offset, true);
+    if (id === 0 || id > 0xFFFFFF) {
+      id = players.length + 1;
+    }
+    
+    // Read shirt name (after player name, with some gap)
+    const shirtOffset = nameOffset + 46 + 15; // Approximate
     let shirtName = '';
-    for (let searchOffset = nameOffset + name.length + 1; 
-         searchOffset < nameOffset + 100 && searchOffset < data.length - 10; 
-         searchOffset++) {
-      if (data[searchOffset] >= 65 && data[searchOffset] <= 90) {
-        const testName = readPlayerName(data, searchOffset);
-        if (testName.length >= 3 && isShirtName(testName)) {
-          shirtName = testName;
-          break;
-        }
-      }
+    if (shirtOffset + 18 < data.length) {
+      shirtName = readAsciiName(data, shirtOffset, 18);
+      if (!isShirtName(shirtName)) shirtName = '';
+    }
+    
+    // Read other attributes (approximate offsets)
+    const attrOffset = offset + 160; // Approximate location of attributes
+    let age = 0, height = 0, weight = 0, position = 0, nationality = 0;
+    
+    if (attrOffset + 10 < data.length) {
+      const ageVal = data[attrOffset];
+      const heightVal = data[attrOffset + 1];
+      const weightVal = data[attrOffset + 2];
+      const posVal = data[attrOffset + 3];
+      
+      if (ageVal > 15 && ageVal < 50) age = ageVal;
+      if (heightVal > 150 && heightVal < 210) height = heightVal;
+      if (weightVal > 50 && weightVal < 120) weight = weightVal;
+      if (posVal < 15) position = posVal;
     }
     
     players.push({
       id,
       name,
       shirtName,
-      nationality: 0,
-      age: 0,
-      height: 0,
-      weight: 0,
-      position: 0,
-      offset: entryStart
+      nationality,
+      age,
+      height,
+      weight,
+      position,
+      offset
     });
   }
+  
+  // Log sample of parsed players
+  console.log('[PARSER] Sample players:');
+  players.slice(0, 10).forEach((p, i) => {
+    console.log(`  ${i + 1}. ${p.name} (ID: ${p.id})`);
+  });
   
   return players;
 }
 
-function isRealNameStart(data: Uint8Array, offset: number): boolean {
-  if (offset + 4 >= data.length) return false;
-  
-  const c0 = data[offset];
-  const c1 = data[offset + 1];
-  const c2 = data[offset + 2];
-  
-  // Pattern 1: "X. SURNAME" (initial + period + space + uppercase)
-  if (c0 >= 65 && c0 <= 90 && c1 === 46 && c2 === 32) {
-    const c3 = data[offset + 3];
-    if (c3 >= 65 && c3 <= 90) {
-      return true;
-    }
-  }
-  
-  // Pattern 2: "SURNAME" (all uppercase, at least 3 chars)
-  if (c0 >= 65 && c0 <= 90 && c1 >= 65 && c1 <= 90 && c2 >= 65 && c2 <= 90) {
-    return true;
-  }
-  
-  // Pattern 3: "Surname" (capitalized, followed by lowercase)
-  if (c0 >= 65 && c0 <= 90 && c1 >= 97 && c1 <= 122 && c2 >= 97 && c2 <= 122) {
-    return true;
-  }
-  
-  return false;
-}
-
-function readPlayerName(data: Uint8Array, offset: number): string {
+function readAsciiName(data: Uint8Array, offset: number, maxLen: number): string {
   let result = '';
   
-  for (let i = 0; i < 40 && offset + i < data.length; i++) {
+  for (let i = 0; i < maxLen && offset + i < data.length; i++) {
     const c = data[offset + i];
     
     if (c === 0) break; // Null terminator
     
-    // Valid name characters: A-Z, a-z, space, period, apostrophe, hyphen
+    // Valid name characters
     if ((c >= 65 && c <= 90) ||   // A-Z
         (c >= 97 && c <= 122) ||  // a-z
         c === 32 ||               // space
-        c === 46 ||               // period
-        c === 39 ||               // apostrophe
-        c === 45) {               // hyphen
+        c === 46 ||               // .
+        c === 39 ||               // '
+        c === 45) {               // -
       result += String.fromCharCode(c);
     } else {
-      break; // Invalid character
+      break;
     }
   }
   
   return result.trim();
 }
 
-function isRealPlayerName(name: string): boolean {
+function isValidPlayerName(name: string): boolean {
   if (!name || name.length < 3 || name.length > 35) return false;
   
-  // Must start with uppercase letter
+  // Must start with uppercase
   if (!/^[A-Z]/.test(name)) return false;
   
-  // Filter out garbage patterns
-  // Real names shouldn't have random character sequences
-  
-  // Pattern: "X. SURNAME" - valid
-  if (/^[A-Z]\. [A-Z][A-Z]+$/.test(name)) return true;
-  
-  // Pattern: "X. Surname" - valid
+  // Pattern: "X. SURNAME" (initial + period + space + surname)
+  if (/^[A-Z]\. [A-Z][A-Z]+/.test(name)) return true;
   if (/^[A-Z]\. [A-Z][a-z]+/.test(name)) return true;
   
-  // Pattern: "SURNAME" (all caps, no weird chars) - valid
-  if (/^[A-Z][A-Z][A-Z]+$/.test(name) && !/[^A-Z\s]/.test(name)) return true;
+  // Pattern: "FULL NAME" (all caps with spaces)
+  if (/^[A-Z][A-Z\s'.]+[A-Z]$/.test(name) && name.length >= 4) return true;
   
-  // Pattern: "Van Surname" - valid
+  // Pattern: "Name Surname" (mixed case)
   if (/^[A-Z][a-z]+ [A-Z][a-z]+/.test(name)) return true;
   
-  // Pattern: full names with spaces - valid  
-  if (/^[A-Z][A-Z\s'.-]+$/.test(name) && name.length >= 4) {
-    // Check it has at least one vowel (real names usually do)
-    if (/[AEIOU]/.test(name)) return true;
-  }
-  
-  // Pattern: "De Surname", "Van Surname", "O'Surname"
+  // Pattern: "De/Van/O' Surname"
   if (/^(De|Van|Von|Le|La|Di|Da|O')[A-Z\s]/.test(name)) return true;
   
   return false;
@@ -289,18 +208,7 @@ function isShirtName(name: string): boolean {
   if (!name || name.length < 3 || name.length > 18) return false;
   
   // Shirt names are usually all uppercase
-  if (/^[A-Z][A-Z\s'.-]+$/.test(name)) {
-    // Should have vowels
-    if (/[AEIOU]/.test(name)) return true;
-  }
-  
-  return false;
-}
-
-function formatHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join(' ');
+  return /^[A-Z][A-Z\s'.]+$/.test(name);
 }
 
 export { parseOptionFile as parseEditFile };
