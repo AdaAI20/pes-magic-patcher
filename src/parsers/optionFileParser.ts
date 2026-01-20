@@ -1,16 +1,12 @@
-// src/parsers/optionFileParser.ts
-// PES 2021 EDIT file parser - FINAL VERSION
+// REPLACE THE CONTENT OF YOUR PARSER FILE (whichever is being imported)
+// src/parsers/optionFileParser.ts OR src/lib/optionFileParser.ts
 
 import { decryptEditBin, initCrypto } from '../crypto/pesCrypto';
 
-// File structure constants
-const HEADER_SIZE = 80;           // 0x50
-const PLAYER_ENTRY_SIZE = 312;    // 0x138
-const FIRST_PLAYER_OFFSET = 178;  // 0xB2 - where first name starts
-
-// Within each 312-byte entry, name is at offset 98 (0x62) from entry start
-// Entry start = 0xB2 - 0x62 = 0x50 (80) = right after header!
-const NAME_OFFSET_IN_ENTRY = 98;  // 0x62
+// PES 2021 EDIT file structure
+const HEADER_SIZE = 80;
+const PLAYER_ENTRY_SIZE = 312;
+const NAME_OFFSET_IN_ENTRY = 98;
 
 export interface Player {
   id: number;
@@ -32,6 +28,7 @@ export interface ParsedEditData {
 }
 
 export async function parseOptionFile(file: File): Promise<ParsedEditData> {
+  console.log('[PARSER] === NEW PARSER ACTIVE ===');
   console.log('[PARSER] Parsing:', file.name);
   
   await initCrypto();
@@ -51,18 +48,19 @@ export async function parseOptionFile(file: File): Promise<ParsedEditData> {
   
   console.log('[PARSER] Version:', version);
   console.log('[PARSER] Header size:', headerSize);
-  console.log('[PARSER] Player count (header):', playerCountHeader);
+  console.log('[PARSER] Data size:', dataSize);
+  console.log('[PARSER] Player count from header:', playerCountHeader);
 
-  // Validate decrypted file
+  // Check if valid decrypted file
   if (version > 100 || headerSize === 0 || headerSize > 500) {
-    console.log('[PARSER] ⚠️ File may not be properly decrypted');
+    console.log('[PARSER] ⚠️ Invalid header - file may not be decrypted');
     return { players: [], teams: [], version: 0, playerCount: 0 };
   }
 
-  // Parse players using fixed structure
-  const players = parsePlayersFixed(data, view, headerSize, playerCountHeader);
+  // Parse players with fixed 312-byte entries
+  const players = parsePlayersWithFixedSize(data, view, headerSize, playerCountHeader);
   
-  console.log('[PARSER] ✅ Loaded', players.length, 'players');
+  console.log('[PARSER] ✅ Total players loaded:', players.length);
   
   return {
     players,
@@ -72,7 +70,7 @@ export async function parseOptionFile(file: File): Promise<ParsedEditData> {
   };
 }
 
-function parsePlayersFixed(
+function parsePlayersWithFixedSize(
   data: Uint8Array,
   view: DataView,
   headerSize: number,
@@ -81,79 +79,66 @@ function parsePlayersFixed(
   const players: Player[] = [];
   const seenNames = new Set<string>();
   
-  // Player entries start right after header
-  const entryStart = headerSize; // 80 bytes
+  const entryStart = headerSize; // 80
   const maxPlayers = Math.min(expectedCount, 15000);
   
-  console.log('[PARSER] Entry start:', entryStart, 'Entry size:', PLAYER_ENTRY_SIZE);
-  
+  console.log('[PARSER] Entry start offset:', entryStart);
+  console.log('[PARSER] Entry size:', PLAYER_ENTRY_SIZE);
+  console.log('[PARSER] Name offset in entry:', NAME_OFFSET_IN_ENTRY);
+  console.log('[PARSER] Expected players:', maxPlayers);
+
   for (let i = 0; i < maxPlayers; i++) {
-    const offset = entryStart + (i * PLAYER_ENTRY_SIZE);
+    const entryOffset = entryStart + (i * PLAYER_ENTRY_SIZE);
     
-    if (offset + PLAYER_ENTRY_SIZE > data.length) {
+    if (entryOffset + PLAYER_ENTRY_SIZE > data.length) {
       console.log('[PARSER] Reached end of file at entry', i);
       break;
     }
     
-    // Read player name at fixed offset within entry
-    const nameOffset = offset + NAME_OFFSET_IN_ENTRY;
+    // Name is at offset 98 (0x62) within each entry
+    const nameOffset = entryOffset + NAME_OFFSET_IN_ENTRY;
     const name = readAsciiName(data, nameOffset, 46);
     
-    // Skip if no valid name or duplicate
+    // Validate name
     if (!name || name.length < 3) continue;
     if (!isValidPlayerName(name)) continue;
     if (seenNames.has(name)) continue;
     
     seenNames.add(name);
     
-    // Read player ID (usually at entry start)
-    let id = view.getUint32(offset, true);
+    // Read player ID (at entry start)
+    let id = view.getUint32(entryOffset, true);
     if (id === 0 || id > 0xFFFFFF) {
       id = players.length + 1;
     }
     
-    // Read shirt name (after player name, with some gap)
-    const shirtOffset = nameOffset + 46 + 15; // Approximate
+    // Read shirt name (after player name with gap)
+    const shirtOffset = nameOffset + 50;
     let shirtName = '';
     if (shirtOffset + 18 < data.length) {
-      shirtName = readAsciiName(data, shirtOffset, 18);
-      if (!isShirtName(shirtName)) shirtName = '';
-    }
-    
-    // Read other attributes (approximate offsets)
-    const attrOffset = offset + 160; // Approximate location of attributes
-    let age = 0, height = 0, weight = 0, position = 0, nationality = 0;
-    
-    if (attrOffset + 10 < data.length) {
-      const ageVal = data[attrOffset];
-      const heightVal = data[attrOffset + 1];
-      const weightVal = data[attrOffset + 2];
-      const posVal = data[attrOffset + 3];
-      
-      if (ageVal > 15 && ageVal < 50) age = ageVal;
-      if (heightVal > 150 && heightVal < 210) height = heightVal;
-      if (weightVal > 50 && weightVal < 120) weight = weightVal;
-      if (posVal < 15) position = posVal;
+      const possibleShirt = readAsciiName(data, shirtOffset, 18);
+      if (isShirtName(possibleShirt)) {
+        shirtName = possibleShirt;
+      }
     }
     
     players.push({
       id,
       name,
       shirtName,
-      nationality,
-      age,
-      height,
-      weight,
-      position,
-      offset
+      nationality: 0,
+      age: 0,
+      height: 0,
+      weight: 0,
+      position: 0,
+      offset: entryOffset
     });
+    
+    // Log first 10 players for verification
+    if (players.length <= 10) {
+      console.log(`[PARSER] Player ${players.length}: "${name}" (ID: ${id})`);
+    }
   }
-  
-  // Log sample of parsed players
-  console.log('[PARSER] Sample players:');
-  players.slice(0, 10).forEach((p, i) => {
-    console.log(`  ${i + 1}. ${p.name} (ID: ${p.id})`);
-  });
   
   return players;
 }
@@ -163,16 +148,10 @@ function readAsciiName(data: Uint8Array, offset: number, maxLen: number): string
   
   for (let i = 0; i < maxLen && offset + i < data.length; i++) {
     const c = data[offset + i];
+    if (c === 0) break;
     
-    if (c === 0) break; // Null terminator
-    
-    // Valid name characters
-    if ((c >= 65 && c <= 90) ||   // A-Z
-        (c >= 97 && c <= 122) ||  // a-z
-        c === 32 ||               // space
-        c === 46 ||               // .
-        c === 39 ||               // '
-        c === 45) {               // -
+    if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || 
+        c === 32 || c === 46 || c === 39 || c === 45) {
       result += String.fromCharCode(c);
     } else {
       break;
@@ -184,31 +163,25 @@ function readAsciiName(data: Uint8Array, offset: number, maxLen: number): string
 
 function isValidPlayerName(name: string): boolean {
   if (!name || name.length < 3 || name.length > 35) return false;
-  
-  // Must start with uppercase
   if (!/^[A-Z]/.test(name)) return false;
   
-  // Pattern: "X. SURNAME" (initial + period + space + surname)
+  // "X. SURNAME" pattern
   if (/^[A-Z]\. [A-Z][A-Z]+/.test(name)) return true;
   if (/^[A-Z]\. [A-Z][a-z]+/.test(name)) return true;
   
-  // Pattern: "FULL NAME" (all caps with spaces)
+  // All caps name
   if (/^[A-Z][A-Z\s'.]+[A-Z]$/.test(name) && name.length >= 4) return true;
   
-  // Pattern: "Name Surname" (mixed case)
+  // Mixed case "Name Surname"
   if (/^[A-Z][a-z]+ [A-Z][a-z]+/.test(name)) return true;
-  
-  // Pattern: "De/Van/O' Surname"
-  if (/^(De|Van|Von|Le|La|Di|Da|O')[A-Z\s]/.test(name)) return true;
   
   return false;
 }
 
 function isShirtName(name: string): boolean {
   if (!name || name.length < 3 || name.length > 18) return false;
-  
-  // Shirt names are usually all uppercase
   return /^[A-Z][A-Z\s'.]+$/.test(name);
 }
 
+// Also export as parseEditFile for compatibility
 export { parseOptionFile as parseEditFile };
