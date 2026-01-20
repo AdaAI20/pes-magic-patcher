@@ -1,25 +1,15 @@
+// src/pages/Leagues.tsx
 import { useState } from "react";
 import {
-  Search,
-  Plus,
-  Download,
-  Upload,
-  MoreHorizontal,
-  Edit,
-  Trash2,
-  ChevronRight,
-  Trophy,
-  Shield,
-  Globe,
+  Search, Plus, Download, Upload, MoreHorizontal, Edit, Trash2,
+  ChevronRight, Trophy, Shield, Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useEditBinStore } from "@/store/editBinStore";
 import { cn } from "@/lib/utils";
 
 interface League {
@@ -28,25 +18,53 @@ interface League {
   country: string;
   teams: number;
   tier: number;
-  season: string;
-  color: string;
+  season?: string;
+  color?: string;
+  offset?: number;
 }
 
-const mockLeagues: League[] = [
+const defaultLeagues: League[] = [
   { id: 1, name: "Premier League", country: "England", teams: 20, tier: 1, season: "2020-21", color: "#3D195B" },
   { id: 2, name: "La Liga", country: "Spain", teams: 20, tier: 1, season: "2020-21", color: "#EE8707" },
   { id: 3, name: "Bundesliga", country: "Germany", teams: 18, tier: 1, season: "2020-21", color: "#D20515" },
   { id: 4, name: "Serie A", country: "Italy", teams: 20, tier: 1, season: "2020-21", color: "#024494" },
   { id: 5, name: "Ligue 1", country: "France", teams: 20, tier: 1, season: "2020-21", color: "#DBA111" },
   { id: 6, name: "Eredivisie", country: "Netherlands", teams: 18, tier: 1, season: "2020-21", color: "#E85B1A" },
-  { id: 7, name: "Primeira Liga", country: "Portugal", teams: 18, tier: 1, season: "2020-21", color: "#1B4D3E" },
+  { id: 7, name: "Liga Portugal", country: "Portugal", teams: 18, tier: 1, season: "2020-21", color: "#1B4D3E" },
   { id: 8, name: "Champions League", country: "Europe", teams: 32, tier: 0, season: "2020-21", color: "#071D49" },
 ];
 
+function getLeagueColor(name: string): string {
+  const colors: Record<string, string> = {
+    'Premier League': '#3D195B',
+    'La Liga': '#EE8707',
+    'Bundesliga': '#D20515',
+    'Serie A': '#024494',
+    'Ligue 1': '#DBA111',
+    'Eredivisie': '#E85B1A',
+    'Liga Portugal': '#1B4D3E',
+    'Champions League': '#071D49',
+    'Europa League': '#F68E1E',
+  };
+  return colors[name] || '#6B7280';
+}
+
 export default function Leagues() {
+  const storeData = useEditBinStore((state) => state.data);
+  const storeLeagues = storeData?.leagues || [];
+  
+  // Use store leagues if available, otherwise use defaults
+  const leagues: League[] = storeLeagues.length > 0 
+    ? storeLeagues.map(l => ({
+        ...l,
+        season: '2020-21',
+        color: getLeagueColor(l.name),
+      }))
+    : defaultLeagues;
+
   const [searchQuery, setSearchQuery] = useState("");
 
-  const filteredLeagues = mockLeagues.filter((league) =>
+  const filteredLeagues = leagues.filter((league) =>
     league.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     league.country.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -60,13 +78,15 @@ export default function Leagues() {
             League <span className="text-gradient-primary">Manager</span>
           </h1>
           <p className="text-muted-foreground">
-            {mockLeagues.length} leagues configured
+            {leagues.length} leagues {storeLeagues.length > 0 ? '(from EDIT file)' : '(sample data)'}
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="default" className="gap-2">
-            <Upload className="w-4 h-4" />
-            Import
+          <Button variant="outline" size="default" className="gap-2" asChild>
+            <a href="#/import">
+              <Upload className="w-4 h-4" />
+              Import EDIT
+            </a>
           </Button>
           <Button variant="outline" size="default" className="gap-2">
             <Download className="w-4 h-4" />
@@ -102,7 +122,7 @@ export default function Leagues() {
             <div className="flex items-start gap-4">
               <div
                 className="w-16 h-16 rounded-xl flex items-center justify-center shrink-0"
-                style={{ backgroundColor: league.color }}
+                style={{ backgroundColor: league.color || '#6B7280' }}
               >
                 <Trophy className="w-8 h-8 text-white" />
               </div>
@@ -116,8 +136,12 @@ export default function Leagues() {
                     <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
                       <Globe className="w-4 h-4" />
                       <span>{league.country}</span>
-                      <span>•</span>
-                      <span>{league.season}</span>
+                      {league.season && (
+                        <>
+                          <span>•</span>
+                          <span>{league.season}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <DropdownMenu>
