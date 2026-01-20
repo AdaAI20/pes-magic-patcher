@@ -1,32 +1,27 @@
 // src/parsers/optionFileParser.ts
-// PES EDIT file parser - handles decrypted EDIT files
+// PES 2021 EDIT file parser - ASCII names
 
 import { decryptEditBin, initCrypto } from '../crypto/pesCrypto';
 
-// EDIT file structure constants (from decrypted format)
-const EDIT_HEADER = {
-  VERSION_OFFSET: 0x00,
-  HEADER_SIZE_OFFSET: 0x04,
-  DATA_SIZE_OFFSET: 0x08,
-  PLAYER_COUNT_OFFSET: 0x0C,
-  TEAM_COUNT_OFFSET: 0x10,
-  // Player data typically starts after the header
-  PLAYER_DATA_START: 0x50, // 80 bytes header
+// EDIT file header structure
+const HEADER = {
+  VERSION: 0x00,        // 4 bytes
+  HEADER_SIZE: 0x04,    // 4 bytes (usually 80 = 0x50)
+  DATA_SIZE: 0x08,      // 4 bytes
+  PLAYER_COUNT: 0x0C,   // 4 bytes
+  TEAM_COUNT: 0x10,     // 4 bytes
 };
 
-// Player entry structure
+// Player entry structure (PES 2021 decrypted format)
 const PLAYER_ENTRY = {
-  SIZE: 124, // Typical PES 2021 player entry size
-  ID_OFFSET: 0x00,
-  NAME_OFFSET: 0x04,
-  NAME_LENGTH: 46, // UTF-16LE, 23 characters
-  SHIRT_NAME_OFFSET: 0x34,
-  SHIRT_NAME_LENGTH: 32,
-  NATIONALITY_OFFSET: 0x54,
-  AGE_OFFSET: 0x56,
-  HEIGHT_OFFSET: 0x58,
-  WEIGHT_OFFSET: 0x59,
-  POSITION_OFFSET: 0x5A,
+  SIZE: 112,            // Approximate entry size
+  
+  // Offsets within each entry
+  ID: 0x00,             // 4 bytes
+  NAME: 0x5A,           // ASCII string, null-terminated
+  NAME_MAX_LEN: 46,
+  SHIRT_NAME: 0x90,     // ASCII string
+  SHIRT_NAME_MAX_LEN: 18,
 };
 
 export interface Player {
@@ -45,8 +40,7 @@ export interface ParsedEditData {
   players: Player[];
   teams: any[];
   version: number;
-  headerSize: number;
-  dataSize: number;
+  playerCount: number;
 }
 
 export async function parseOptionFile(file: File): Promise<ParsedEditData> {
@@ -59,194 +53,176 @@ export async function parseOptionFile(file: File): Promise<ParsedEditData> {
   const data = new Uint8Array(decryptedBuffer);
   const view = new DataView(decryptedBuffer);
   
-  console.log('[PARSER] Data size:', data.length);
+  console.log('[PARSER] File size:', data.length);
   console.log('[PARSER] First 32 bytes:', formatHex(data.slice(0, 32)));
 
   // Read header
-  const version = view.getUint32(EDIT_HEADER.VERSION_OFFSET, true);
-  const headerSize = view.getUint32(EDIT_HEADER.HEADER_SIZE_OFFSET, true);
-  const dataSize = view.getUint32(EDIT_HEADER.DATA_SIZE_OFFSET, true);
+  const version = view.getUint32(HEADER.VERSION, true);
+  const headerSize = view.getUint32(HEADER.HEADER_SIZE, true);
+  const dataSize = view.getUint32(HEADER.DATA_SIZE, true);
+  const playerCount = view.getUint32(HEADER.PLAYER_COUNT, true);
   
   console.log('[PARSER] Version:', version);
   console.log('[PARSER] Header size:', headerSize);
   console.log('[PARSER] Data size:', dataSize);
+  console.log('[PARSER] Player count:', playerCount);
 
-  // Detect if this is a valid decrypted file
-  if (version > 0x20 || headerSize > 0x200 || headerSize === 0) {
-    console.log('[PARSER] Invalid header, trying to find player data...');
-    return findPlayerData(data);
+  // Validate header
+  if (version > 100 || headerSize === 0 || headerSize > 1000) {
+    console.log('[PARSER] Invalid header, falling back to scan mode');
+    return scanForPlayers(data);
   }
 
-  // Parse players
-  const players = parsePlayersFromHeader(data, view, headerSize);
+  // Find player data
+  const players = findAndParsePlayersByASCII(data, headerSize, Math.min(playerCount, 20000));
   
-  console.log('[PARSER] Parsed', players.length, 'players');
+  console.log('[PARSER] ✅ Parsed', players.length, 'players');
   
   return {
     players,
     teams: [],
     version,
-    headerSize,
-    dataSize
+    playerCount
   };
 }
 
-function parsePlayersFromHeader(
+function findAndParsePlayersByASCII(
   data: Uint8Array, 
-  view: DataView, 
-  headerSize: number
+  startOffset: number,
+  expectedCount: number
 ): Player[] {
+  console.log('[PARSER] Scanning for ASCII names starting at 0x' + startOffset.toString(16));
+  
   const players: Player[] = [];
+  const foundOffsets: number[] = [];
   
-  // Try to read player count from header
-  let playerCount = 0;
-  if (headerSize >= 0x10) {
-    playerCount = view.getUint32(EDIT_HEADER.PLAYER_COUNT_OFFSET, true);
-  }
-  
-  // Sanity check
-  if (playerCount > 50000 || playerCount === 0) {
-    console.log('[PARSER] Invalid player count:', playerCount, '- scanning for players...');
-    return scanForPlayers(data, headerSize);
-  }
-  
-  console.log('[PARSER] Player count from header:', playerCount);
-  
-  // Calculate player data start
-  const playerDataStart = headerSize > 0 ? headerSize : EDIT_HEADER.PLAYER_DATA_START;
-  
-  // Try different entry sizes
-  const entrySizes = [124, 128, 140, 188, 180, 160];
-  
-  for (const entrySize of entrySizes) {
-    const testPlayers = tryParseWithEntrySize(data, playerDataStart, playerCount, entrySize);
-    if (testPlayers.length > 0 && hasValidPlayerNames(testPlayers)) {
-      console.log('[PARSER] Found valid players with entry size:', entrySize);
-      return testPlayers;
-    }
-  }
-  
-  // Fallback: scan for players
-  return scanForPlayers(data, playerDataStart);
-}
-
-function tryParseWithEntrySize(
-  data: Uint8Array, 
-  startOffset: number, 
-  count: number, 
-  entrySize: number
-): Player[] {
-  const players: Player[] = [];
-  const view = new DataView(data.buffer);
-  const maxPlayers = Math.min(count, 1000);
-  
-  for (let i = 0; i < maxPlayers; i++) {
-    const offset = startOffset + (i * entrySize);
-    
-    if (offset + entrySize > data.length) break;
-    
-    try {
-      const player = readPlayerEntry(data, view, offset, entrySize);
-      if (player) {
-        players.push(player);
+  // First pass: find all potential player names
+  for (let i = startOffset; i < data.length - 20 && foundOffsets.length < expectedCount + 100; i++) {
+    // Look for pattern: uppercase letter followed by more name chars
+    if (isNameStart(data, i)) {
+      const name = readAsciiString(data, i, 46);
+      
+      if (isValidPlayerName(name)) {
+        foundOffsets.push(i);
+        // Skip past this name
+        i += name.length + 10;
       }
-    } catch (e) {
-      // Continue
     }
+  }
+  
+  console.log('[PARSER] Found', foundOffsets.length, 'potential name positions');
+  
+  if (foundOffsets.length === 0) {
+    return [];
+  }
+  
+  // Analyze entry size
+  const entrySizes: number[] = [];
+  for (let i = 1; i < Math.min(20, foundOffsets.length); i++) {
+    entrySizes.push(foundOffsets[i] - foundOffsets[i - 1]);
+  }
+  
+  // Find most common entry size
+  const sizeCount: Record<number, number> = {};
+  for (const size of entrySizes) {
+    sizeCount[size] = (sizeCount[size] || 0) + 1;
+  }
+  
+  let mostCommonSize = 112; // default
+  let maxCount = 0;
+  for (const [size, count] of Object.entries(sizeCount)) {
+    if (count > maxCount) {
+      maxCount = count;
+      mostCommonSize = parseInt(size);
+    }
+  }
+  
+  console.log('[PARSER] Detected entry size:', mostCommonSize);
+  
+  // Second pass: parse players with known structure
+  const view = new DataView(data.buffer);
+  
+  // Find first player entry start
+  const firstNameOffset = foundOffsets[0];
+  // Entry likely starts before the name
+  const possibleEntryStarts = [0, 20, 40, 60, 80, 90];
+  
+  let entryStart = startOffset;
+  let nameOffsetInEntry = firstNameOffset - startOffset;
+  
+  // Find where entry actually starts relative to name
+  for (const offset of possibleEntryStarts) {
+    if (firstNameOffset - offset >= startOffset) {
+      const testStart = firstNameOffset - offset;
+      // Check if this looks like a valid entry start (usually has ID)
+      const testId = view.getUint32(testStart, true);
+      if (testId > 0 && testId < 0xFFFFFF) {
+        entryStart = testStart;
+        nameOffsetInEntry = offset;
+        break;
+      }
+    }
+  }
+  
+  console.log('[PARSER] Entry start:', '0x' + entryStart.toString(16));
+  console.log('[PARSER] Name offset in entry:', nameOffsetInEntry);
+  
+  // Parse players
+  for (let i = 0; i < Math.min(expectedCount, foundOffsets.length); i++) {
+    const nameOffset = foundOffsets[i];
+    const entryOffset = nameOffset - nameOffsetInEntry;
+    
+    if (entryOffset < 0 || entryOffset + mostCommonSize > data.length) continue;
+    
+    const name = readAsciiString(data, nameOffset, 46);
+    
+    // Try to read ID (usually 4 bytes at entry start)
+    let id = i + 1;
+    if (entryOffset >= 0 && entryOffset + 4 <= data.length) {
+      const possibleId = view.getUint32(entryOffset, true);
+      if (possibleId > 0 && possibleId < 0xFFFFFF) {
+        id = possibleId;
+      }
+    }
+    
+    // Try to read shirt name (usually after player name)
+    let shirtName = '';
+    const shirtOffset = nameOffset + 46 + 10; // Approximate
+    if (shirtOffset + 18 < data.length) {
+      shirtName = readAsciiString(data, shirtOffset, 18);
+      if (!isValidShirtName(shirtName)) {
+        shirtName = '';
+      }
+    }
+    
+    players.push({
+      id,
+      name,
+      shirtName,
+      nationality: 0,
+      age: 0,
+      height: 0,
+      weight: 0,
+      position: 0,
+      offset: entryOffset
+    });
   }
   
   return players;
 }
 
-function readPlayerEntry(
-  data: Uint8Array, 
-  view: DataView, 
-  offset: number,
-  entrySize: number
-): Player | null {
-  // Read player ID
-  const id = view.getUint32(offset, true);
-  
-  // Validate ID
-  if (id === 0 || id > 0xFFFFFF) return null;
-  
-  // Try to find name at various offsets
-  const nameOffsets = [0x04, 0x08, 0x0C, 0x10, 0x2C, 0x30];
-  let name = '';
-  let nameOffset = 0;
-  
-  for (const nOffset of nameOffsets) {
-    if (offset + nOffset + 46 > data.length) continue;
-    const testName = readUtf16String(data, offset + nOffset, 46);
-    if (isValidPlayerName(testName)) {
-      name = testName;
-      nameOffset = nOffset;
-      break;
-    }
-  }
-  
-  if (!name) return null;
-  
-  // Read shirt name
-  const shirtNameOffset = nameOffset + 48;
-  const shirtName = offset + shirtNameOffset + 32 <= data.length 
-    ? readUtf16String(data, offset + shirtNameOffset, 32)
-    : '';
-  
-  // Read other fields (approximate offsets)
-  const metaOffset = shirtNameOffset + 32;
-  const nationality = offset + metaOffset + 2 <= data.length 
-    ? view.getUint16(offset + metaOffset, true) : 0;
-  const age = offset + metaOffset + 3 <= data.length 
-    ? data[offset + metaOffset + 2] : 0;
-  const height = offset + metaOffset + 4 <= data.length 
-    ? data[offset + metaOffset + 3] : 0;
-  const weight = offset + metaOffset + 5 <= data.length 
-    ? data[offset + metaOffset + 4] : 0;
-  const position = offset + metaOffset + 6 <= data.length 
-    ? data[offset + metaOffset + 5] : 0;
-  
-  return {
-    id,
-    name,
-    shirtName,
-    nationality,
-    age: age > 0 && age < 60 ? age : 0,
-    height: height > 100 && height < 230 ? height : 0,
-    weight: weight > 40 && weight < 150 ? weight : 0,
-    position: position < 20 ? position : 0,
-    offset
-  };
-}
-
-function scanForPlayers(data: Uint8Array, startOffset: number): Player[] {
-  console.log('[PARSER] Scanning for players starting at:', startOffset);
+function scanForPlayers(data: Uint8Array): ParsedEditData {
+  console.log('[PARSER] Full scan mode...');
   
   const players: Player[] = [];
-  const view = new DataView(data.buffer);
   
-  // Look for UTF-16LE strings that look like names
-  for (let i = startOffset; i < data.length - 50 && players.length < 500; i += 2) {
-    // Check for capital letter followed by null byte (UTF-16LE)
-    if (data[i] >= 0x41 && data[i] <= 0x5A && data[i + 1] === 0) {
-      const name = readUtf16String(data, i, 46);
+  for (let i = 0; i < data.length - 10 && players.length < 500; i++) {
+    if (isNameStart(data, i)) {
+      const name = readAsciiString(data, i, 46);
       
-      if (isValidPlayerName(name) && name.length >= 3) {
-        // Try to find player ID before the name
-        // Usually ID is 4 bytes before name
-        let id = 0;
-        for (const idOffset of [4, 8, 12, 16]) {
-          if (i - idOffset >= 0) {
-            const testId = view.getUint32(i - idOffset, true);
-            if (testId > 0 && testId < 0xFFFFFF) {
-              id = testId;
-              break;
-            }
-          }
-        }
-        
+      if (isValidPlayerName(name)) {
         players.push({
-          id: id || players.length + 1,
+          id: players.length + 1,
           name,
           shirtName: '',
           nationality: 0,
@@ -257,38 +233,46 @@ function scanForPlayers(data: Uint8Array, startOffset: number): Player[] {
           offset: i
         });
         
-        // Skip past this name
-        i += name.length * 2 + 50;
+        i += name.length + 50;
       }
     }
   }
-  
-  console.log('[PARSER] Found', players.length, 'players by scanning');
-  return players;
-}
-
-function findPlayerData(data: Uint8Array): ParsedEditData {
-  console.log('[PARSER] Searching for player data in unknown format...');
-  
-  const players = scanForPlayers(data, 0);
   
   return {
     players,
     teams: [],
     version: 0,
-    headerSize: 0,
-    dataSize: data.length
+    playerCount: players.length
   };
 }
 
-function readUtf16String(data: Uint8Array, offset: number, maxBytes: number): string {
+function isNameStart(data: Uint8Array, offset: number): boolean {
+  if (offset + 3 >= data.length) return false;
+  
+  const c0 = data[offset];
+  const c1 = data[offset + 1];
+  
+  // Uppercase letter followed by lowercase or "."
+  if (c0 >= 65 && c0 <= 90) { // A-Z
+    if ((c1 >= 97 && c1 <= 122) || c1 === 46 || c1 === 32 || c1 === 39) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+function readAsciiString(data: Uint8Array, offset: number, maxLen: number): string {
   let result = '';
   
-  for (let i = 0; i < maxBytes && offset + i + 1 < data.length; i += 2) {
-    const charCode = data[offset + i] | (data[offset + i + 1] << 8);
-    if (charCode === 0) break;
-    if (charCode >= 0x20 && charCode < 0xFFFF) {
-      result += String.fromCharCode(charCode);
+  for (let i = 0; i < maxLen && offset + i < data.length; i++) {
+    const c = data[offset + i];
+    
+    if (c === 0) break; // Null terminator
+    
+    // Valid ASCII printable characters
+    if (c >= 32 && c < 127) {
+      result += String.fromCharCode(c);
     } else {
       break;
     }
@@ -298,23 +282,29 @@ function readUtf16String(data: Uint8Array, offset: number, maxBytes: number): st
 }
 
 function isValidPlayerName(name: string): boolean {
-  if (!name || name.length < 2 || name.length > 30) return false;
+  if (!name || name.length < 2 || name.length > 40) return false;
   
-  // Must start with a letter
-  if (!/^[A-Za-z]/.test(name)) return false;
+  // Must start with uppercase
+  if (!/^[A-Z]/.test(name)) return false;
   
-  // Must be mostly letters/spaces
-  const validChars = name.match(/[A-Za-z\s\-'.]/g);
-  if (!validChars || validChars.length < name.length * 0.7) return false;
+  // Must have mostly letters
+  const letters = name.match(/[A-Za-z]/g);
+  if (!letters || letters.length < name.length * 0.6) return false;
   
-  return true;
+  // Common patterns: "L. MESSI", "RONALDO", "De Bruyne"
+  if (/^[A-Z][a-z]/.test(name) || /^[A-Z]\. [A-Z]/.test(name) || /^[A-Z]{2,}/.test(name)) {
+    return true;
+  }
+  
+  return false;
 }
 
-function hasValidPlayerNames(players: Player[]): boolean {
-  if (players.length === 0) return false;
+function isValidShirtName(name: string): boolean {
+  if (!name || name.length < 2 || name.length > 18) return false;
   
-  const validCount = players.filter(p => isValidPlayerName(p.name)).length;
-  return validCount / players.length > 0.5;
+  // Shirt names are usually all uppercase
+  const upper = name.match(/[A-Z]/g);
+  return upper !== null && upper.length >= name.length * 0.5;
 }
 
 function formatHex(bytes: Uint8Array): string {
