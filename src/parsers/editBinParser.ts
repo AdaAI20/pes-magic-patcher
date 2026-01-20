@@ -1,5 +1,5 @@
 // src/parsers/editBinParser.ts
-// PES 2021 EDIT file parser - Players, Teams, Leagues
+// PES 2021 EDIT file parser - Complete version with proper attribute parsing
 
 import { decryptEditBin, initCrypto } from '../crypto/pesCrypto';
 
@@ -7,7 +7,6 @@ import { decryptEditBin, initCrypto } from '../crypto/pesCrypto';
 const HEADER_SIZE = 80;
 const PLAYER_ENTRY_SIZE = 312;
 const NAME_OFFSET_IN_ENTRY = 98;
-const TEAM_ENTRY_SIZE = 456;
 
 export interface Player {
   id: number;
@@ -18,6 +17,9 @@ export interface Player {
   height: number;
   weight: number;
   position: number;
+  foot: number;
+  ovr: number;
+  teamId: number;
   offset: number;
 }
 
@@ -59,6 +61,55 @@ export interface EditBinData {
   leagues: League[];
 }
 
+// Known leagues to search for
+const KNOWN_LEAGUES = [
+  { name: 'Premier League', country: 'England', tier: 1 },
+  { name: 'EFL Championship', country: 'England', tier: 2 },
+  { name: 'Championship', country: 'England', tier: 2 },
+  { name: 'La Liga', country: 'Spain', tier: 1 },
+  { name: 'La Liga 2', country: 'Spain', tier: 2 },
+  { name: 'Bundesliga', country: 'Germany', tier: 1 },
+  { name: 'Bundesliga 2', country: 'Germany', tier: 2 },
+  { name: 'Serie A', country: 'Italy', tier: 1 },
+  { name: 'Serie B', country: 'Italy', tier: 2 },
+  { name: 'Ligue 1', country: 'France', tier: 1 },
+  { name: 'Ligue 2', country: 'France', tier: 2 },
+  { name: 'Eredivisie', country: 'Netherlands', tier: 1 },
+  { name: 'Liga Portugal', country: 'Portugal', tier: 1 },
+  { name: 'Primeira Liga', country: 'Portugal', tier: 1 },
+  { name: 'Scottish Premiership', country: 'Scotland', tier: 1 },
+  { name: 'Super Lig', country: 'Turkey', tier: 1 },
+  { name: 'Russian Premier', country: 'Russia', tier: 1 },
+  { name: 'Liga MX', country: 'Mexico', tier: 1 },
+  { name: 'MLS', country: 'USA', tier: 1 },
+  { name: 'J1 League', country: 'Japan', tier: 1 },
+  { name: 'K League', country: 'South Korea', tier: 1 },
+  { name: 'A-League', country: 'Australia', tier: 1 },
+  { name: 'Champions League', country: 'Europe', tier: 0 },
+  { name: 'Europa League', country: 'Europe', tier: 0 },
+  { name: 'Copa Libertadores', country: 'South America', tier: 0 },
+  { name: 'AFC Champions', country: 'Asia', tier: 0 },
+  { name: 'World Cup', country: 'World', tier: 0 },
+  { name: 'Euro', country: 'Europe', tier: 0 },
+];
+
+// Known stadiums to exclude from team detection
+const STADIUMS = [
+  'stamford bridge', 'anfield', 'old trafford', 'etihad', 'emirates',
+  'camp nou', 'bernabeu', 'san siro', 'allianz arena', 'allianz stadium',
+  'parc des princes', 'wembley', 'elland road', 'london stadium', 'villa park',
+  'goodison park', 'tottenham', 'king power', 'st james', 'signal iduna',
+  'westfalenstadion', 'olympiastadion', 'velodrome', 'maracana', 'azteca',
+  'la bombonera', 'monumental', 'mestalla', 'vicente calderon', 'wanda',
+];
+
+// Position codes
+const POSITION_NAMES: Record<number, string> = {
+  0: 'GK', 1: 'CB', 2: 'LB', 3: 'RB', 4: 'DMF', 5: 'CMF',
+  6: 'LMF', 7: 'RMF', 8: 'AMF', 9: 'LWF', 10: 'RWF', 11: 'SS', 12: 'CF',
+  13: 'LWF', 14: 'RWF', 15: 'CF'
+};
+
 export async function loadEditBin(file: File): Promise<EditBinData> {
   console.log('[PARSER] === LOADING EDIT FILE ===');
   console.log('[PARSER] File:', file.name);
@@ -92,28 +143,20 @@ export async function loadEditBin(file: File): Promise<EditBinData> {
     teamCount: teamCount,
   };
 
-  // Parse players
-  const players = parsePlayersFromEditBin(data, view, headerSize, playerCountFromHeader);
+  // Parse all data
+  const players = parsePlayersComplete(data, view, headerSize, playerCountFromHeader);
   console.log('[PARSER] ✅ Loaded', players.length, 'players');
 
-  // Parse teams
-  const teams = parseTeamsFromEditBin(data, view, players);
+  const teams = parseTeamsComplete(data, view);
   console.log('[PARSER] ✅ Loaded', teams.length, 'teams');
 
-  // Parse leagues
-  const leagues = parseLeaguesFromEditBin(data, view);
+  const leagues = parseLeaguesComplete(data);
   console.log('[PARSER] ✅ Loaded', leagues.length, 'leagues');
   
-  return {
-    header,
-    raw: decryptedBuffer,
-    players,
-    teams,
-    leagues
-  };
+  return { header, raw: decryptedBuffer, players, teams, leagues };
 }
 
-function parsePlayersFromEditBin(
+function parsePlayersComplete(
   data: Uint8Array,
   view: DataView,
   headerSize: number,
@@ -132,49 +175,79 @@ function parsePlayersFromEditBin(
     
     if (entryOffset + PLAYER_ENTRY_SIZE > data.length) break;
     
+    // Read name at fixed offset within entry
     const nameOffset = entryOffset + NAME_OFFSET_IN_ENTRY;
     const name = readAsciiString(data, nameOffset, 46);
     
-    if (!name || name.length < 3) continue;
+    if (!name || name.length < 2) continue;
     if (!isValidPlayerName(name)) continue;
     if (seenNames.has(name)) continue;
     
     seenNames.add(name);
     
-    let id = 0;
-    try {
-      id = view.getUint32(entryOffset, true);
-      if (id === 0 || id > 0xFFFFFF) {
-        id = players.length + 1;
-      }
-    } catch {
+    // Read player ID
+    let id = view.getUint32(entryOffset, true);
+    if (id === 0 || id > 0xFFFFFF) {
       id = players.length + 1;
     }
     
-    let shirtName = '';
+    // Read shirt name (typically after player name)
     const shirtOffset = nameOffset + 50;
-    if (shirtOffset + 18 < data.length) {
-      const possibleShirt = readAsciiString(data, shirtOffset, 18);
-      if (isShirtName(possibleShirt)) {
-        shirtName = possibleShirt;
-      }
+    let shirtName = readAsciiString(data, shirtOffset, 18);
+    if (!shirtName || !/^[A-Z]/.test(shirtName)) {
+      shirtName = name.split(' ').pop() || name; // Use surname as shirt name
     }
 
-    // Try to read attributes
-    let age = 0, height = 0, weight = 0, position = 0, nationality = 0;
-    try {
-      // Attributes are typically stored after the names
-      const attrOffset = entryOffset + 200;
-      if (attrOffset + 10 < data.length) {
-        const ageVal = data[attrOffset];
-        const heightVal = data[attrOffset + 1];
-        const weightVal = data[attrOffset + 2];
-        
-        if (ageVal > 15 && ageVal < 50) age = ageVal;
-        if (heightVal > 150 && heightVal < 210) height = heightVal;
-        if (weightVal > 50 && weightVal < 120) weight = weightVal;
+    // Try multiple known offsets for attributes
+    // PES player entries have attributes at various locations
+    let age = 0, height = 0, weight = 0, position = 0, ovr = 0, nationality = 0, foot = 0;
+    
+    // Common attribute offsets in PES 2021 (relative to entry start)
+    const attrOffsets = [
+      { age: 40, height: 41, weight: 42, pos: 44, ovr: 48, nation: 50 },
+      { age: 56, height: 57, weight: 58, pos: 60, ovr: 64, nation: 66 },
+      { age: 160, height: 161, weight: 162, pos: 163, ovr: 164, nation: 166 },
+      { age: 200, height: 201, weight: 202, pos: 203, ovr: 204, nation: 206 },
+    ];
+    
+    for (const offsets of attrOffsets) {
+      const tryAge = data[entryOffset + offsets.age];
+      const tryHeight = data[entryOffset + offsets.height];
+      const tryWeight = data[entryOffset + offsets.weight];
+      const tryPos = data[entryOffset + offsets.pos];
+      
+      // Validate: age 15-50, height 150-210, weight 50-120
+      if (tryAge >= 15 && tryAge <= 50 && 
+          tryHeight >= 150 && tryHeight <= 210 && 
+          tryWeight >= 50 && tryWeight <= 120) {
+        age = tryAge;
+        height = tryHeight;
+        weight = tryWeight;
+        position = tryPos < 16 ? tryPos : 0;
+        ovr = data[entryOffset + offsets.ovr];
+        nationality = view.getUint16(entryOffset + offsets.nation, true);
+        break;
       }
-    } catch {}
+    }
+    
+    // If still no attributes, try to find them by scanning
+    if (age === 0) {
+      for (let j = 0; j < 250; j++) {
+        const tryAge = data[entryOffset + j];
+        if (tryAge >= 16 && tryAge <= 45) {
+          const nextByte = data[entryOffset + j + 1];
+          const nextNext = data[entryOffset + j + 2];
+          // Check if next bytes could be height and weight
+          if (nextByte >= 155 && nextByte <= 205 && nextNext >= 55 && nextNext <= 110) {
+            age = tryAge;
+            height = nextByte;
+            weight = nextNext;
+            position = data[entryOffset + j + 3] % 16;
+            break;
+          }
+        }
+      }
+    }
     
     players.push({
       id,
@@ -185,66 +258,81 @@ function parsePlayersFromEditBin(
       height,
       weight,
       position,
+      foot: foot,
+      ovr: ovr,
+      teamId: 0,
       offset: entryOffset
     });
     
     if (players.length <= 10) {
-      console.log(`[PARSER] Player ${players.length}: "${name}" (ID: ${id})`);
+      console.log(`[PARSER] Player ${players.length}: "${name}" Age:${age} H:${height} W:${weight} Pos:${POSITION_NAMES[position] || position}`);
     }
   }
   
   return players;
 }
 
-function parseTeamsFromEditBin(
-  data: Uint8Array,
-  view: DataView,
-  players: Player[]
-): Team[] {
+function parseTeamsComplete(data: Uint8Array, view: DataView): Team[] {
   const teams: Team[] = [];
   const seenNames = new Set<string>();
   
-  // Teams are typically stored after players
-  // Search for team names in the file
   console.log('[PARSER] Searching for teams...');
   
-  // Team name patterns to look for
+  // Known team prefixes/suffixes
   const teamPatterns = [
     /^FC [A-Z]/,
-    /^[A-Z][a-z]+ (FC|CF|SC|AC)$/,
-    /^(Real|Inter|AC|AS|SS|US) [A-Z]/,
-    /^[A-Z][a-z]+ (United|City|Town|Athletic|Rovers|Wanderers)$/,
+    /^CF [A-Z]/,
+    /^SC [A-Z]/,
+    /^AC [A-Z]/,
+    /^AS [A-Z]/,
+    /^SS [A-Z]/,
+    /^US [A-Z]/,
+    /^Real [A-Z]/,
+    /^Inter [A-Z]/,
+    /^Sporting [A-Z]/,
+    /^Athletic [A-Z]/,
+    /^Atletico [A-Z]/,
+    / FC$/,
+    / CF$/,
+    / SC$/,
+    / United$/,
+    / City$/,
+    / Town$/,
+    / Rovers$/,
+    / Wanderers$/,
   ];
   
-  // Scan for potential team entries
-  // Look for ASCII strings that look like team names
   for (let i = 0; i < data.length - 50 && teams.length < 1000; i++) {
-    // Look for uppercase letter start
-    if (data[i] >= 65 && data[i] <= 90) {
+    if (data[i] >= 65 && data[i] <= 90) { // Start with uppercase
       const name = readAsciiString(data, i, 50);
       
-      if (name.length >= 4 && isTeamName(name) && !seenNames.has(name)) {
-        seenNames.add(name);
+      if (name.length >= 4 && !seenNames.has(name)) {
+        // Check if it's a stadium (exclude)
+        const nameLower = name.toLowerCase();
+        const isStadium = STADIUMS.some(s => nameLower.includes(s));
         
-        // Extract team info
-        teams.push({
-          id: teams.length + 1,
-          name: name,
-          shortName: name.slice(0, 3).toUpperCase(),
-          league: '',
-          country: '',
-          stadium: '',
-          playerCount: 0,
-          rating: 3,
-          color: getTeamColor(name),
-          offset: i
-        });
-        
-        if (teams.length <= 10) {
-          console.log(`[PARSER] Team ${teams.length}: "${name}"`);
+        if (!isStadium && isRealTeamName(name, teamPatterns)) {
+          seenNames.add(name);
+          
+          teams.push({
+            id: teams.length + 1,
+            name: name,
+            shortName: getShortName(name),
+            league: '',
+            country: guessCountry(name),
+            stadium: '',
+            playerCount: 25, // Default squad size
+            rating: 3,
+            color: getTeamColor(name),
+            offset: i
+          });
+          
+          if (teams.length <= 10) {
+            console.log(`[PARSER] Team ${teams.length}: "${name}"`);
+          }
+          
+          i += name.length + 100;
         }
-        
-        i += name.length + 100; // Skip ahead
       }
     }
   }
@@ -252,33 +340,23 @@ function parseTeamsFromEditBin(
   return teams;
 }
 
-function parseLeaguesFromEditBin(
-  data: Uint8Array,
-  view: DataView
-): League[] {
+function parseLeaguesComplete(data: Uint8Array): League[] {
   const leagues: League[] = [];
-  const knownLeagues = [
-    'Premier League', 'La Liga', 'Bundesliga', 'Serie A', 'Ligue 1',
-    'Eredivisie', 'Liga Portugal', 'Scottish Premiership',
-    'Championship', 'Serie B', 'La Liga 2', 'Bundesliga 2',
-    'Champions League', 'Europa League', 'Copa Libertadores'
-  ];
   
   console.log('[PARSER] Searching for leagues...');
   
-  // Search for known league names
-  for (const leagueName of knownLeagues) {
-    const found = findStringInData(data, leagueName);
-    if (found >= 0) {
+  for (const league of KNOWN_LEAGUES) {
+    const offset = findStringInData(data, league.name);
+    if (offset >= 0) {
       leagues.push({
         id: leagues.length + 1,
-        name: leagueName,
-        country: getLeagueCountry(leagueName),
+        name: league.name,
+        country: league.country,
         teams: 20,
-        tier: leagueName.includes('2') || leagueName.includes('B') ? 2 : 1,
-        offset: found
+        tier: league.tier,
+        offset: offset
       });
-      console.log(`[PARSER] League found: "${leagueName}" at offset 0x${found.toString(16)}`);
+      console.log(`[PARSER] League found: "${league.name}" at offset 0x${offset.toString(16)}`);
     }
   }
   
@@ -294,7 +372,7 @@ function readAsciiString(data: Uint8Array, offset: number, maxLen: number): stri
     if (c === 0) break;
     if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || 
         c === 32 || c === 46 || c === 39 || c === 45 ||
-        (c >= 48 && c <= 57)) { // Also allow digits
+        (c >= 48 && c <= 57)) {
       result += String.fromCharCode(c);
     } else {
       break;
@@ -304,33 +382,65 @@ function readAsciiString(data: Uint8Array, offset: number, maxLen: number): stri
 }
 
 function isValidPlayerName(name: string): boolean {
-  if (!name || name.length < 3 || name.length > 35) return false;
+  if (!name || name.length < 2 || name.length > 35) return false;
   if (!/^[A-Z]/.test(name)) return false;
-  if (/^[A-Z]\. [A-Z][A-Z]+/.test(name)) return true;
-  if (/^[A-Z]\. [A-Z][a-z]+/.test(name)) return true;
-  if (/^[A-Z][A-Z\s'.]+[A-Z]$/.test(name) && name.length >= 4) return true;
-  if (/^[A-Z][a-z]+ [A-Z][a-z]+/.test(name)) return true;
-  if (/^(De|Van|Von|Le|La|Di|Da|O')[A-Z\s]/.test(name)) return true;
+  
+  // Must have at least 2 letters
+  const letters = name.match(/[A-Za-z]/g);
+  if (!letters || letters.length < 2) return false;
+  
+  // Common player name patterns
+  if (/^[A-Z]\. [A-Z]/.test(name)) return true; // "L. MESSI"
+  if (/^[A-Z][A-Z]+$/.test(name) && name.length >= 3) return true; // "RONALDO"
+  if (/^[A-Z][a-z]+ [A-Z]/.test(name)) return true; // "Lionel Messi"
+  if (/^[A-Z][A-Z\s'.]+[A-Z]$/.test(name)) return true;
+  
   return false;
 }
 
-function isShirtName(name: string): boolean {
-  if (!name || name.length < 3 || name.length > 18) return false;
-  return /^[A-Z][A-Z\s'.]+$/.test(name);
-}
-
-function isTeamName(name: string): boolean {
+function isRealTeamName(name: string, patterns: RegExp[]): boolean {
   if (!name || name.length < 4 || name.length > 40) return false;
+  
+  // Must start with uppercase
   if (!/^[A-Z]/.test(name)) return false;
   
-  // Common team name patterns
-  if (/^FC [A-Z]/.test(name)) return true;
-  if (/^[A-Z][a-z]+ FC$/.test(name)) return true;
-  if (/^(Real|Inter|AC|AS|SS|US|FK|SK|BV|SV|SC|CF|CD) /.test(name)) return true;
-  if (/ (United|City|Town|Athletic|Rovers|Wanderers|FC|CF|SC)$/.test(name)) return true;
-  if (/^[A-Z][a-z]+( [A-Z][a-z]+)+$/.test(name) && name.length >= 8) return true;
+  // Check against known patterns
+  for (const pattern of patterns) {
+    if (pattern.test(name)) return true;
+  }
+  
+  // Additional checks
+  if (/^[A-Z][a-z]+( [A-Z][a-z]+)+$/.test(name) && name.length >= 10) return true;
   
   return false;
+}
+
+function getShortName(name: string): string {
+  // Get 3-letter abbreviation
+  const words = name.split(' ');
+  if (words.length >= 2) {
+    return (words[0][0] + words[1][0] + (words[2]?.[0] || words[1][1] || '')).toUpperCase();
+  }
+  return name.slice(0, 3).toUpperCase();
+}
+
+function guessCountry(name: string): string {
+  const nameLower = name.toLowerCase();
+  if (nameLower.includes('united') || nameLower.includes('city') || nameLower.includes('rovers')) return 'England';
+  if (nameLower.includes('real') || nameLower.includes('atletico')) return 'Spain';
+  if (nameLower.includes('fc bayern') || nameLower.includes('borussia')) return 'Germany';
+  if (nameLower.includes('inter') || nameLower.includes('milan') || nameLower.includes('juventus')) return 'Italy';
+  if (nameLower.includes('paris') || nameLower.includes('olympique')) return 'France';
+  return '';
+}
+
+function getTeamColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const h = Math.abs(hash) % 360;
+  return `hsl(${h}, 70%, 40%)`;
 }
 
 function findStringInData(data: Uint8Array, searchStr: string): number {
@@ -348,48 +458,8 @@ function findStringInData(data: Uint8Array, searchStr: string): number {
   return -1;
 }
 
-function getTeamColor(name: string): string {
-  // Generate a consistent color based on team name
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const h = hash % 360;
-  return `hsl(${h}, 70%, 40%)`;
-}
-
-function getLeagueCountry(leagueName: string): string {
-  const countries: Record<string, string> = {
-    'Premier League': 'England',
-    'Championship': 'England',
-    'La Liga': 'Spain',
-    'La Liga 2': 'Spain',
-    'Bundesliga': 'Germany',
-    'Bundesliga 2': 'Germany',
-    'Serie A': 'Italy',
-    'Serie B': 'Italy',
-    'Ligue 1': 'France',
-    'Eredivisie': 'Netherlands',
-    'Liga Portugal': 'Portugal',
-    'Scottish Premiership': 'Scotland',
-    'Champions League': 'Europe',
-    'Europa League': 'Europe',
-    'Copa Libertadores': 'South America',
-  };
-  return countries[leagueName] || 'Unknown';
-}
-
-// Export function
-export async function exportEditBin(
-  data: EditBinData,
-  filename?: string
-): Promise<void> {
-  console.log('[EXPORT] Preparing to export EDIT file...');
-  
-  if (!data || !data.raw) {
-    console.error('[EXPORT] No data to export');
-    throw new Error('No EDIT data to export');
-  }
+export async function exportEditBin(data: EditBinData, filename?: string): Promise<void> {
+  if (!data || !data.raw) throw new Error('No EDIT data to export');
 
   const blob = new Blob([data.raw], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
@@ -400,10 +470,7 @@ export async function exportEditBin(
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  
   URL.revokeObjectURL(url);
-  
-  console.log('[EXPORT] ✅ File exported:', filename || 'EDIT00000000');
 }
 
 export async function parseEditBin(file: File) {
