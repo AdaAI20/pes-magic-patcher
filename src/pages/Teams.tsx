@@ -1,73 +1,72 @@
+// src/pages/Teams.tsx
 import { useState } from "react";
 import {
-  Search,
-  Filter,
-  Plus,
-  Download,
-  Upload,
-  MoreHorizontal,
-  Edit,
-  Trash2,
-  Users,
-  Shirt,
-  LayoutGrid,
-  List,
+  Search, Filter, Plus, Download, Upload, MoreHorizontal, Edit, Trash2,
+  Users, Shirt, LayoutGrid, List,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useEditBinStore } from "@/store/editBinStore";
 import { cn } from "@/lib/utils";
 
 interface Team {
   id: number;
   name: string;
+  shortName?: string;
   league: string;
   country: string;
-  players: number;
-  stadium: string;
-  rating: number;
+  playerCount?: number;
+  stadium?: string;
+  rating?: number;
   color: string;
+  offset?: number;
 }
 
-const mockTeams: Team[] = [
-  { id: 1, name: "FC Barcelona", league: "La Liga", country: "Spain", players: 28, stadium: "Camp Nou", rating: 5, color: "#A50044" },
-  { id: 2, name: "Real Madrid", league: "La Liga", country: "Spain", players: 27, stadium: "Santiago Bernabéu", rating: 5, color: "#FEBE10" },
-  { id: 3, name: "Manchester United", league: "Premier League", country: "England", players: 30, stadium: "Old Trafford", rating: 5, color: "#DA291C" },
-  { id: 4, name: "Manchester City", league: "Premier League", country: "England", players: 29, stadium: "Etihad Stadium", rating: 5, color: "#6CABDD" },
-  { id: 5, name: "Paris Saint-Germain", league: "Ligue 1", country: "France", players: 31, stadium: "Parc des Princes", rating: 5, color: "#004170" },
-  { id: 6, name: "FC Bayern München", league: "Bundesliga", country: "Germany", players: 28, stadium: "Allianz Arena", rating: 5, color: "#DC052D" },
-  { id: 7, name: "Juventus", league: "Serie A", country: "Italy", players: 29, stadium: "Allianz Stadium", rating: 5, color: "#000000" },
-  { id: 8, name: "Liverpool", league: "Premier League", country: "England", players: 28, stadium: "Anfield", rating: 5, color: "#C8102E" },
+const defaultTeams: Team[] = [
+  { id: 1, name: "FC Barcelona", league: "La Liga", country: "Spain", playerCount: 28, stadium: "Camp Nou", rating: 5, color: "#A50044" },
+  { id: 2, name: "Real Madrid", league: "La Liga", country: "Spain", playerCount: 27, stadium: "Santiago Bernabéu", rating: 5, color: "#FEBE10" },
+  { id: 3, name: "Manchester United", league: "Premier League", country: "England", playerCount: 30, stadium: "Old Trafford", rating: 5, color: "#DA291C" },
+  { id: 4, name: "Manchester City", league: "Premier League", country: "England", playerCount: 29, stadium: "Etihad Stadium", rating: 5, color: "#6CABDD" },
+  { id: 5, name: "Paris Saint-Germain", league: "Ligue 1", country: "France", playerCount: 31, stadium: "Parc des Princes", rating: 5, color: "#004170" },
+  { id: 6, name: "FC Bayern München", league: "Bundesliga", country: "Germany", playerCount: 28, stadium: "Allianz Arena", rating: 5, color: "#DC052D" },
+  { id: 7, name: "Juventus", league: "Serie A", country: "Italy", playerCount: 29, stadium: "Allianz Stadium", rating: 5, color: "#000000" },
+  { id: 8, name: "Liverpool", league: "Premier League", country: "England", playerCount: 28, stadium: "Anfield", rating: 5, color: "#C8102E" },
 ];
 
 const leagues = ["All", "La Liga", "Premier League", "Bundesliga", "Serie A", "Ligue 1"];
 
 export default function Teams() {
+  const storeData = useEditBinStore((state) => state.data);
+  const storeTeams = storeData?.teams || [];
+  
+  // Use store teams if available, otherwise use defaults
+  const teams: Team[] = storeTeams.length > 0 
+    ? storeTeams.map(t => ({
+        ...t,
+        playerCount: t.playerCount || 0,
+        stadium: t.stadium || '',
+        rating: t.rating || 3,
+      }))
+    : defaultTeams;
+
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLeague, setSelectedLeague] = useState("All");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
-  const filteredTeams = mockTeams.filter((team) => {
+  const filteredTeams = teams.filter((team) => {
     const q = searchQuery.toLowerCase();
     const matchesSearch =
       team.name.toLowerCase().includes(q) ||
       team.league.toLowerCase().includes(q) ||
       team.country.toLowerCase().includes(q);
 
-    const matchesLeague =
-      selectedLeague === "All" || team.league === selectedLeague;
+    const matchesLeague = selectedLeague === "All" || team.league === selectedLeague;
 
     return matchesSearch && matchesLeague;
   });
@@ -81,13 +80,15 @@ export default function Teams() {
             Team <span className="text-gradient-primary">Editor</span>
           </h1>
           <p className="text-muted-foreground">
-            {filteredTeams.length} teams shown
+            {filteredTeams.length} teams {storeTeams.length > 0 ? '(from EDIT file)' : '(sample data)'}
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="outline" className="gap-2">
-            <Upload className="w-4 h-4" />
-            Import
+          <Button variant="outline" className="gap-2" asChild>
+            <a href="#/import">
+              <Upload className="w-4 h-4" />
+              Import EDIT
+            </a>
           </Button>
           <Button variant="outline" className="gap-2">
             <Download className="w-4 h-4" />
@@ -119,9 +120,7 @@ export default function Teams() {
             </SelectTrigger>
             <SelectContent>
               {leagues.map((league) => (
-                <SelectItem key={league} value={league}>
-                  {league}
-                </SelectItem>
+                <SelectItem key={league} value={league}>{league}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -155,9 +154,7 @@ export default function Teams() {
       {/* Empty State */}
       {filteredTeams.length === 0 && (
         <div className="card-gaming p-10 text-center">
-          <p className="text-muted-foreground">
-            No teams match your filters.
-          </p>
+          <p className="text-muted-foreground">No teams match your filters.</p>
         </div>
       )}
 
@@ -179,11 +176,7 @@ export default function Teams() {
 
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 opacity-0 group-hover:opacity-100"
-                    >
+                    <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100">
                       <MoreHorizontal className="w-4 h-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -211,23 +204,23 @@ export default function Teams() {
               <h3 className="font-display font-semibold text-lg mb-1 group-hover:text-primary">
                 {team.name}
               </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                {team.league}
-              </p>
+              <p className="text-sm text-muted-foreground mb-4">{team.league}</p>
 
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Users className="w-4 h-4" />
-                  {team.players} players
+                  {team.playerCount || 0} players
                 </div>
                 <div className="text-accent">
-                  {"★".repeat(team.rating)}
+                  {"★".repeat(team.rating || 3)}
                 </div>
               </div>
 
-              <div className="mt-4 pt-4 border-t border-border text-xs text-muted-foreground truncate">
-                📍 {team.stadium}
-              </div>
+              {team.stadium && (
+                <div className="mt-4 pt-4 border-t border-border text-xs text-muted-foreground truncate">
+                  📍 {team.stadium}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -267,10 +260,10 @@ export default function Teams() {
                     </td>
                     <td className="px-4 py-3 text-sm">{team.league}</td>
                     <td className="px-4 py-3 text-sm">{team.country}</td>
-                    <td className="px-4 py-3 text-center text-sm">{team.players}</td>
-                    <td className="px-4 py-3 text-sm">{team.stadium}</td>
+                    <td className="px-4 py-3 text-center text-sm">{team.playerCount || 0}</td>
+                    <td className="px-4 py-3 text-sm">{team.stadium || '-'}</td>
                     <td className="px-4 py-3 text-center text-accent">
-                      {"★".repeat(team.rating)}
+                      {"★".repeat(team.rating || 3)}
                     </td>
                     <td className="px-4 py-3">
                       <DropdownMenu>
